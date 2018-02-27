@@ -2,17 +2,20 @@
 This is a client which will connect to the distributed system for test purposes.
 To be decided: communication protocol, etc.
 '''
-import ClientLib as lib
+import sys, os, socket
+import ClientLib  as lib
+
+
+def print_message(message):
+    print('Client:\t' + message + '\n')
 
 
 def main():
-    lib.print_message('Hello world from client')
-    while True:
-        try:
-            lib.send_request()
-        except Exception as e:
-            lib.print_message(e.message)
-            exit(1)
+    print('Hello world from client')
+    lib.send_request()
+
+
+
 
 if __name__ == "__main__":
-    main()
+	main()
