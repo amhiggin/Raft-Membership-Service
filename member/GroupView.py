@@ -16,6 +16,7 @@ class GroupView:
     def add_member(self, new_member):
         if not self.members.__contains__(new_member):
             self.members.append(new_member)
+            print('Added new member {0} to the group view'.format(new_member.name))
         else:
             # TODO Pooja this may need to be added to the log
             print('Member {0} was already in the group view - did not add duplicate.'.format(new_member.name))
@@ -24,6 +25,7 @@ class GroupView:
     def remove_member(self, old_member):
         if self.members.contains(old_member):
             self.members.remove(old_member)
+            print('Removed member {0} from the group view'.format(old_member.name))
         else:
             # TODO Pooja this may need to be added to the log
             print('Member {0} was not in the group view - did not attempt removal.'.format(old_member.name))
