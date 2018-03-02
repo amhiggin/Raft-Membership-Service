@@ -2,7 +2,7 @@
 
 NUM_SERVERS=$1
 
-echo "Launching $NUMSERVERS servers"
+echo "Launching $NUM_SERVERS nodes"
 
 for i in $( seq 2 $1 )
 do

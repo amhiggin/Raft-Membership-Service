@@ -2,15 +2,16 @@
 Library to house all of the API methods for member servers
 '''
 
-import time, MessageType
+import time
+import MessageType
 
 
 def get_timestamp():
     return time.strftime("%a %c %Y")
 
 
-def print_message(message):
-    print('Server:\t' + message + '\n')
+def print_message(message, id):
+    print('Member {}:\t'.format(id) + message + '\n')
 
 
 def send_heartbeat(connection):
