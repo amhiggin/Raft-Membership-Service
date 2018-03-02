@@ -7,11 +7,23 @@ To be decided: communication protocol (TCP/UDP), membership management protocol 
 import _thread, os, sys
 import socket
 import MemberLib as lib
-import GroupView, Log
+import GroupView
 from State import State
 import time
 import struct
 import random
+import logging
+
+logging.basicConfig(
+    filename="DistributedManagementSystem.log",
+    level=logging.INFO,
+    format="%(asctime)s:%(levelname)s:%(message)s"
+    )
+logging.basicConfig(
+    filename="DistributedManagementSystemError.log",
+    level=logging.ERROR,
+    format="%(asctime)s:%(levelname)s:%(message)s"
+    )
 
 SERVER_PORT = 45678  # Review
 ERROR_CODE = 0  # Default
@@ -23,8 +35,7 @@ class Member:
 
     def __init__(self):
         self.group_view = GroupView
-        self.log = Log
-
+        
         # Determined at runtime
         self.id = None
         self.server_socket = None
@@ -55,6 +66,7 @@ class Member:
                     current_time = time.time()
                     if current_time > self.heartbeat_timeout_point:
                         lib.print_message('Heartbeat timeout - I am now the leader', self.id)
+                        logging.info('Heartbeat timeout - I am now the leader', self.id)
                         self.state = State.leader
 
     # Loop - listen for multicast messages
@@ -62,6 +74,7 @@ class Member:
         while True:
             data, leader_address = self.server_socket.recvfrom(1024)
             lib.print_message('Received message from ' + str(leader_address) + ': ' + data.decode(), id)
+            logging.info('Received message from ' + str(leader_address) + ': ' + data.decode(), id)
             # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
 
     # Startup node, configure socket
@@ -71,7 +84,8 @@ class Member:
         global ERROR_CODE
 
         lib.print_message('Online', id)
-
+        logging.info('Online', id)
+        
         try:
 
             _thread.start_new_thread(self.heartbeat_timer_thread, ())
@@ -97,6 +111,8 @@ class Member:
                     # Send heartbeat messages
                     while self.state == State.leader and running == True:
                         lib.print_message('Sending heartbeats', id)
+                        logging.info('Sending heartbeats', id)
+                        
                         heartbeat_message = 'heartbeat'
                         try:
                             leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
@@ -105,6 +121,7 @@ class Member:
 
                         except Exception as e2:
                             lib.print_message('Exception e2: ' + str(e2), id)
+                            logging.error('Exception e2: ' + str(e2), id)
                             ERROR_CODE = 1
 
                         # Shut down after sending a certain number of heartbeats, so that the followers will timeout
@@ -115,6 +132,7 @@ class Member:
                             #self.heartbeat_timeout_point = time.time() + 10
 
                             lib.print_message('Leader shutting down!', id)
+                            logging.info('Leader shutting down!', id)
                             running = False
 
                         time.sleep(2);
@@ -143,6 +161,7 @@ class Member:
 
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), id)
+            logging.error('Exception e1: ' + str(e1), id)
             ERROR_CODE = 1
         finally:
             sys.exit(ERROR_CODE)
