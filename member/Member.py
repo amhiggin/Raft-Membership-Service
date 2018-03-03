@@ -65,9 +65,10 @@ class Member:
                 else:
                     current_time = time.time()
                     if current_time > self.heartbeat_timeout_point:
-                        lib.print_message('Heartbeat timeout - I am now the leader', self.id)
-                        logging.info('Heartbeat timeout - I am now the leader', self.id)
-                        self.state = State.leader
+                        lib.print_message('Heartbeat timeout - I am now a candidate', self.id)
+                        logging.info('Heartbeat timeout - I am now a candidate', self.id)
+                        self.state = State.candidate                            
+                        
 
     # Loop - listen for multicast messages
     def multicast_listening_thread(self):
@@ -157,6 +158,39 @@ class Member:
                             # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
                         except Exception as e3:
                             if str(e3) == 'timed out':
+                                pass    # Continue
+
+                if self.state = State.candidate:
+                    # Request votes through broadcast message
+                    votes_needed = GroupView.get_group_size / 2
+                    votes_received = 0
+                    voters = []
+                    multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+                    self.server_socket.sendto('vote_request'.encode(), multicast_group)
+                    
+                    #Loop - wait for votes
+                    #Todo edit GroupView to only include nodes which sent votes?
+                    while self.state == State.candidate and running == True:
+                        try:
+                            data, address = self.server_socket.recvfrom(1024)
+
+                            if data.decode() == 'vote':
+                                lib.print_message('Vote received', id)
+                                if not voters.__contains__(address):
+                                    #TODO how is a member represented in GroupView? address/id?
+                                    voters.append(address)
+                                    votes_received += 1
+                                if votes_received > votes_needed:
+                                    lib.print_message('Sufficient votes received - I am now a leader', self.id)
+                                    logging.info('Sufficient votes received - I am now a leader', self.id)
+                                    self.state = State.leader
+                                    self.server_socket.sendto('new_leader'.encode(), multicast_group)
+                            if data.decode() == 'new_leader':
+                                lib.print_message('Other leader elected - I am now a follower', self.id)
+                                logging.info('Other leader elected - I am now a follower', self.id)
+                                self.state = State.follower
+                        except Exception as e4:
+                            if str(e4) == 'timed out':
                                 pass    # Continue
 
         except Exception as e1:
