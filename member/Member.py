@@ -13,6 +13,7 @@ import time
 import struct
 import random
 import logging
+import Message
 
 logging.basicConfig(
     filename="DistributedManagementSystem.log",
@@ -45,6 +46,9 @@ class Member:
 
         # End leader thread after sending a certain number of heartbeats, so that the followers will all timeout
         self.num_heartbeats_sent = 0
+        # Current term for voting, needed to ensure that members can only vote once per term
+        # Int is unbounded in Python 3 so I think using this as an infinite counter is no problem
+        self.term = 0
 
 
     def get_group_view(self):
@@ -78,6 +82,9 @@ class Member:
             logging.info('Received message from ' + str(leader_address) + ': ' + data.decode(), id)
             # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
 
+    def respond_to_vote_request(self, received_request):
+        pass
+    
     # Startup node, configure socket
     def start_serving(self, id):
         self.id = id
@@ -150,32 +157,36 @@ class Member:
                     while self.state == State.follower and running == True:
                         try:
                             data, leader_address = self.server_socket.recvfrom(1024)
+                            message = data.decode()
 
-                            if data.decode() == 'heartbeat':
+                            if message.get_message_type() == MessageType.heartbeat:
                                 lib.print_message('Received heartbeat', id)
                                 self.heartbeat_received = True
+                                self.server_socket.sendto(Message(self.term, MessageType.heartbeat_ack, '').encode(), leader_address)
 
                             # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
                         except Exception as e3:
                             if str(e3) == 'timed out':
                                 pass    # Continue
 
-                if self.state = State.candidate:
+                if self.state == State.candidate:
                     # Request votes through broadcast message
                     votes_needed = GroupView.get_group_size / 2
                     votes_received = 0
                     voters = []
                     multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
-                    self.server_socket.sendto('vote_request'.encode(), multicast_group)
+                    self.term += 1
+                    self.server_socket.sendto(Message(self.term, MessageType.vote_request, '').encode(), multicast_group)
                     
                     #Loop - wait for votes
                     #Todo edit GroupView to only include nodes which sent votes?
                     while self.state == State.candidate and running == True:
                         try:
                             data, address = self.server_socket.recvfrom(1024)
+                            message = data.decode()
 
-                            if data.decode() == 'vote':
-                                lib.print_message('Vote received', id)
+                            if message.get_message_type() == MessageType.vote and message.get_term() == self.term:
+                                lib.print_message('Vote received from ' + address, id)
                                 if not voters.__contains__(address):
                                     #TODO how is a member represented in GroupView? address/id?
                                     voters.append(address)
@@ -184,10 +195,14 @@ class Member:
                                     lib.print_message('Sufficient votes received - I am now a leader', self.id)
                                     logging.info('Sufficient votes received - I am now a leader', self.id)
                                     self.state = State.leader
-                                    self.server_socket.sendto('new_leader'.encode(), multicast_group)
-                            if data.decode() == 'new_leader':
+                                    self.server_socket.sendto(Message(self.term, MessageType.new_leader, '').encode(), multicast_group)
+                            elif message.get_message_type == MessageType.new_leader :
                                 lib.print_message('Other leader elected - I am now a follower', self.id)
                                 logging.info('Other leader elected - I am now a follower', self.id)
+                                self.state = State.follower
+                            elif message.get_term > self.term :
+                                lib.print_message('My term is outdated - I am now a follower', self.id)
+                                logging.info('My term is outdated - I am now a follower', self.id)
                                 self.state = State.follower
                         except Exception as e4:
                             if str(e4) == 'timed out':
