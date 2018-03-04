@@ -2,8 +2,8 @@
 This is a client which will connect to the distributed system for test purposes.
 To be decided: communication protocol, etc.
 '''
-import sys, os, socket
-import ClientLib  as lib
+
+import ClientLib as lib
 
 
 def print_message(message):
@@ -15,7 +15,5 @@ def main():
     lib.send_request()
 
 
-
-
 if __name__ == "__main__":
-	main()
+    main()
