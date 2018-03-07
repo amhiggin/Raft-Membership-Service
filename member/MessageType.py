@@ -9,4 +9,3 @@ class MessageType(Enum):
         heartbeat_ack = 4 # Heartbeat acknowledgement
         vote_request = 5 # Candidate requesting votes
         vote = 6        # Follower vote
-        new_leader = 7  # Candidate announces itself as the new leader

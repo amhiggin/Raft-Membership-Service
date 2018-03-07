@@ -15,6 +15,7 @@ import time
 import struct
 import random
 import logging
+import pickle
 import Message as Message
 
 logging.basicConfig(
@@ -80,7 +81,7 @@ class Member:
                         self.state = State.candidate
             elif self.state == State.leader:
                 message, follower_address = self.server_socket.recvfrom(RECV_BYTES)
-                message = message.decode()
+                message = pickle.load(message)
                 if message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
                     lib.print_message('Heartbeat acknowledgement received from ' + follower_address, self.id)
                     #logging.info('Heartbeat acknowledgement received from ' + follower_address, self.id)
@@ -89,14 +90,10 @@ class Member:
     def multicast_listening_thread(self):
         while True:
             message, leader_address = self.server_socket.recvfrom(RECV_BYTES)
-            message = message.decode()
+            message = pickle.load(message)
             lib.print_message('Received message from ' + str(leader_address) + ': ' + message.get_data(), id)
             #logging.info('Received message from ' + str(leader_address) + ': ' + message.get_data(), id)
             # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
-
-    def respond_to_vote_request(self, received_request):
-        # TODO implement
-        pass
 
     # Startup node, configure socket
     def start_serving(self, id):
@@ -167,7 +164,7 @@ class Member:
                     while self.state == State.follower and running is True:
                         try:
                             message, sender = self.server_socket.recvfrom(RECV_BYTES)
-                            message = message.decode()
+                            message = pickle.load(message)
 
                             if message.get_term() > self.term:
                                 self.term = message.get_term()
@@ -176,11 +173,11 @@ class Member:
                             if message.get_message_type() == MessageType.MessageType.heartbeat:
                                 lib.print_message('Received heartbeat', id)
                                 self.heartbeat_received = True
-                                self.server_socket.sendto(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '').encode(), sender)
+                                self.server_socket.sendto(pickle.dump(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '')), sender)
 
                             elif message.get_message_type() == MessageType.MessageType.vote_request:
                                 if message.get_term() == self.term or (message.get_term() == self.term and self.voted is False):
-                                    self.server_socket.sendto(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '').encode(), sender)
+                                    self.server_socket.sendto(pickle.dump(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '')), sender)
                                     self.voted = True
                                     # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
                         except Exception as e3:
@@ -195,14 +192,14 @@ class Member:
                     voters = []
                     multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
                     self.term += 1
-                    self.server_socket.sendto(Message.Message(self.term, MessageType.MessageType.vote_request, '').encode(), multicast_group)
+                    self.server_socket.sendto(pickle.dump(Message.Message(self.term, MessageType.MessageType.vote_request, '')), multicast_group)
 
                     # Loop - wait for votes
                     # Todo Should Groupview be edited?
                     while self.state == State.candidate and running is True:
                         try:
                             message, address = self.server_socket.recvfrom(RECV_BYTES)
-                            message = message.decode()
+                            message = pickle.load(message)
 
                             if message.get_message_type() == MessageType.MessageType.vote and message.get_term() == self.term:
                                 lib.print_message('Vote received from ' + address, id)
@@ -213,8 +210,6 @@ class Member:
                                     lib.print_message('Sufficient votes received - I am now a leader', self.id)
                                     #logging.info('Sufficient votes received - I am now a leader', self.id)
                                     self.state = State.leader
-                                    # TODO maybe this message is useless
-                                    self.server_socket.sendto(Message.Message(self.term, MessageType.MessageType.new_leader, '').get_string_representation().encode(), multicast_group)
                             elif message.get_message_type() == MessageType.MessageType.new_leader or message.get_message_type() == MessageType.MessageType.heartbeat:
                                 lib.print_message('Other leader found - I am now a follower', self.id)
                                 #logging.info('Other leader found - I am now a follower', self.id)
