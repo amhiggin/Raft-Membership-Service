@@ -8,6 +8,10 @@ from enum import Enum
 
 class State(Enum):
 
-        follower = 1    # Follower - default state
-        candidate = 2   # Candidate for election
-        leader = 3       # Leader of group
+        follower = 'follower'    # Follower - default state
+        candidate = 'candidate'   # Candidate for election
+        leader = 'leader'       # Leader of group
+
+        @classmethod
+        def has_value(cls, value):
+                return any(value == item.value for item in cls)

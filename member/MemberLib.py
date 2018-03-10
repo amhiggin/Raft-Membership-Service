@@ -1,34 +1,20 @@
 '''
-Library to house all of the API methods for member servers
+    Library to house all of the API methods for member servers.
 '''
-
+import datetime
+import random
 import time
-import MessageType
+import sys
+sys.path.append("../")
 
 
 def get_timestamp():
-    return time.strftime("%a %c %Y")
+    return datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def print_message(message, id):
-    print('Member {}:\t'.format(id) + message + '\n')
+    print('>> {0} Member {1}:\t'.format(get_timestamp(), id) + message)
 
+def get_random_timeout():
+    return time.time() + random.uniform(4, 10)
 
-def send_heartbeat(connection):
-    connection.sendall(construct_message(MessageType.heartbeat, get_timestamp()).encode())
-
-
-def respond_to_message(connection, data_received):
-    if data_received.contains('heartbeat'):
-        send_heartbeat(connection)
-        return True
-    else:
-        pass  # Client service request: depends on what service is being implemented
-    return None
-
-
-def construct_message(msg_type, message):
-    if msg_type == MessageType.heartbeat:
-        return 'HEARTBEAT-ACK-' + str(message)
-    else:
-        return None

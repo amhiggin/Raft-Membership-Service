@@ -1,11 +1,14 @@
 '''
-This is the view of the membership of the group that each member has at any given time.
-The member should update this groupview as part of the protocol.
-The group view is updated with no more than one change at a time - either an addition or removal of a member.
-Using a list ensures ordering whilst also allowing for arbitrary removal of nodes at any position.
-Checks are in place to prevent duplicates from being added.
+    This is the view of the membership of the group that each member has at any given time.
+    The member should update this groupview as part of the protocol.
+    The group view is updated with no more than one change at a time - either an addition or removal of a member.
+    Using a list ensures ordering whilst also allowing for arbitrary removal of nodes at any position.
+    Checks are in place to prevent duplicates from being added.
 '''
-import logging
+import logging, sys
+sys.path.append("../")
+import MemberLib as lib
+
 
 logging.basicConfig(
     filename="DistributedManagementSystem.log",
@@ -23,24 +26,23 @@ class GroupView(object):
     def add_member(self, new_member):
         if not self.members.__contains__(new_member):
             self.members.append(new_member)
-            print('Added new member {0} to the group view'.format(new_member.name))
-            logging.info('Added new member {0} to the group view'.format(new_member.name))
+            print('>> {0]\t Added member {1} to the group view'.format(lib.get_timestamp(), new_member.name))
+            logging.info('Member {0} joined'.format(new_member.name))
         else:
-            print('Member {0} was already in the group view - did not add duplicate.'.format(new_member.name))
-            logging.info('Member {0} was already in the group view - did not add duplicate.'.format(new_member.name))
+            print('>> {0]\t Member {1} was already in the group view - did not add duplicate.'.format(lib.get_timestamp(), new_member.name))
 
     # Remove a member from the group view
     def remove_member(self, old_member):
         if self.members.contains(old_member):
             self.members.remove(old_member)
-            print('Removed member {0} from the group view'.format(old_member.name))
-            logging.info('Removed member {0} from the group view'.format(old_member.name))
+            print('>> {0]\t Removed member {1} from the group view'.format(lib.get_timestamp(), old_member.name))
+            logging.info('Member {0} left'.format(old_member.name))
         else:
-            print('Member {0} was not in the group view - did not attempt removal.'.format(old_member.name))
-            logging.info('Member {0} was not in the group view - did not attempt removal.'.format(old_member.name))
+            print('>> {0]\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),
+                                                                                                    old_member.name))
 
-    def get_group_view(self):
+    def get_members(self):
         return self.members
 
-    def get_group_size(self):
-        return self.members.__sizeof__()
+    def get_size(self):
+        return len(self.members)
