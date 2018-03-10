@@ -28,7 +28,6 @@ logging.basicConfig(
 '''  Server constants '''
 SERVER_PORT = 45678  # Review
 DEFAULT_STATE = State.follower
-
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 45678
 
@@ -46,27 +45,16 @@ class Member:
         self.heartbeat_received = False
         self.group_view = GroupView.GroupView()
         self.running = None
-
-        # End leader thread after sending a certain number of heartbeats, so that the followers will all timeout
         self.num_heartbeats_sent = 0
-        # Current term for voting, needed to ensure that members can only vote once per term
-        # Int is unbounded in Python 3 so I think using this as an infinite counter is no problem
         self.term = 0
         self.voted = False
-
-        # Set state to default 'follower' if not specified
         if State.has_value(state) and state is not 'candidate':
             self.state = State[state]
         else:
             self.state = DEFAULT_STATE
 
-    def get_group_view(self):
-        return self.group_view
-
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_timer_thread(self):
-        # Random delay - between 4 to 10 seconds
-        # TODO add this to documentation (Will help with report later)
         self.heartbeat_timeout_point = lib.get_random_timeout()
 
         while self.running is True:
@@ -86,19 +74,11 @@ class Member:
                     message, follower_address = self.server_socket.recvfrom(RECV_BYTES)
                     message = pickle.loads(message)
                     if message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
-                        lib.print_message('Heartbeat acknowledgement received from ' + follower_address, self.id)
+                        lib.print_message('Heartbeat ACK received from ' + follower_address, self.id)
+                        if not self.group_view.contains(follower_address):
+                            self.group_view.add_member(follower_address)
                 except Exception as e:
-                    if str(e) == 'timed out':
-                        pass  # Continue
-                    pass
-
-    # Loop - listen for multicast messages
-    def multicast_listening_thread(self):
-        while True:
-            message, leader_address = self.server_socket.recvfrom(RECV_BYTES)
-            message = pickle.loads(message)
-            lib.print_message('Received message from ' + str(leader_address) + ': ' + message.get_data(), id)
-            # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
+                    lib.handle_timeout_exception(e)
 
     # Startup node, configure socket
     def start_serving(self):
@@ -109,7 +89,7 @@ class Member:
             self.running = True
 
             while self.running:
-                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # SOCK_STREAM = TCP, SOCK_DGRAM = UDP
+                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 # Set timeout so the socket does not block indefinitely while trying to receive data
                 self.server_socket.settimeout(0.2)
                 self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -120,23 +100,20 @@ class Member:
                 # If you are the leader, regularly send heartbeat messages via multicast
                 if self.state == State.leader:
                     # Set the time-to-live for messages to 1 so they do not go further than the local network segment
-                    time_to_live = struct.pack('b', 1)
-                    self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, time_to_live)
+                    self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
 
                     # Send heartbeat messages
                     while self.state == State.leader and self.running is True:
                         lib.print_message('Sending heartbeats', self.id)
-                        heartbeat_message = 'heartbeat'
                         try:
                             leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
-                            self.server_socket.sendto(heartbeat_message.encode(), leader_multicast_group)
+                            self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat, '')), leader_multicast_group)
                             self.num_heartbeats_sent += 1
-
+                            # TODO needs to have a per-member list of the heartbeats sent. Heartbeat must also have a sequence number.
                         except Exception as e2:
                             lib.print_message('Exception e2: ' + str(e2), self.id)
 
                         # Shut down after sending a certain number of heartbeats, so that the followers will timeout
-                        # TODO document - this is part of our test framework
                         #if self.num_heartbeats_sent >= 3:
                         #lib.print_message('Leader stepping down!', id)
                         #self.state = State.follower
@@ -162,8 +139,7 @@ class Member:
                 if self.state == State.candidate:
                     # Request votes through broadcast message
                     votes_needed = (self.group_view.get_size() / 2) + 1
-                    # Start by voting for itself
-                    votes_received = 1
+                    votes_received = 1  # Start by voting for itself
                     voters = []
                     multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
                     self.term += 1
@@ -195,9 +171,8 @@ class Member:
                                 self.state = State.follower
                                 self.term = message.get_term()
                         except Exception as e4:
-                            if str(e4) == 'timed out':
-                                lib.print_message("Candidate timeout", self.id)
-                                pass    # Continue
+                            lib.handle_timeout_exception(e4)
+                            lib.print_message("Candidate timeout", self.id)
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
         finally:
@@ -218,6 +193,7 @@ class Member:
                 self.heartbeat_received = True
                 self.server_socket.sendto(
                     pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '')), sender)
+                lib.print_message('Sent heartbeat_ack', self.id)
 
             elif message.get_message_type() == MessageType.MessageType.vote_request:
                 if message.get_term() == self.term or (message.get_term() == self.term and self.voted is False):
@@ -235,9 +211,16 @@ class Member:
 
 
 if __name__ == "__main__":
-    starting_state = sys.argv[1]
-    member = Member(starting_state, random.randint(0, 100))
-    _thread.start_new_thread(member.start_serving, ())
+    member = None
+    try:
+        starting_state = sys.argv[1]
+        member = Member(starting_state, random.randint(0, 100))
+        _thread.start_new_thread(member.start_serving, ())
 
-    while 1:
-        sys.stdout.flush()    # Print output to console instantaneously
+        while 1:
+            sys.stdout.flush()    # Print output to console instantaneously
+    except KeyboardInterrupt as main_exception:
+        member.group_view.erase()
+        logging.shutdown()
+        exit(0)
+

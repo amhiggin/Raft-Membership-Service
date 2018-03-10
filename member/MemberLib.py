@@ -15,6 +15,12 @@ def get_timestamp():
 def print_message(message, id):
     print('>> {0} Member {1}:\t'.format(get_timestamp(), id) + message)
 
+
+# Randomised timeout delay (between 4-10 seconds) used by heartbeat messaging.
 def get_random_timeout():
     return time.time() + random.uniform(4, 10)
 
+
+def handle_timeout_exception(self, e):
+    if str(e) == 'timed out':
+        pass  # Continue
