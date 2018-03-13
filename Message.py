@@ -1,7 +1,7 @@
 
 class Message:
 
-    def __init__(self, term, message_type, data=''):
+    def __init__(self, term, message_type, data=None):
         self.__term = term
         self.__message_type = message_type
         self.__data = data
