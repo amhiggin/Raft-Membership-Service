@@ -21,6 +21,6 @@ def get_random_timeout():
     return time.time() + random.uniform(4, 10)
 
 
-def handle_timeout_exception(self, e):
+def handle_timeout_exception(e):
     if str(e) == 'timed out':
         pass  # Continue
