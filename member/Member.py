@@ -8,15 +8,19 @@
 import _thread, sys
 import socket
 import MemberLib as lib
-from DistributedManagementSystem import MessageType
+import MessageType
 import GroupView as GroupView
 from State import State
 import time
 import struct
 import logging
 import pickle
-from DistributedManagementSystem import Message as Message
+import Message as Message
+import threading
+import MessageDataType
+
 sys.path.append("../")
+sys.path.append(".")
 
 logging.basicConfig(
     filename="DistributedManagementSystem.log",
@@ -46,6 +50,7 @@ class Member:
         self.heartbeat_received = False
         self.ready_to_run_for_election = False
         self.group_view = GroupView.GroupView(starting_number_of_nodes_in_group)
+        self.leader_update_group_view = False
         self.running = None
         self.num_heartbeats_sent = 0
         self.term = 0
@@ -86,7 +91,10 @@ class Member:
         lib.print_message('Online in state {0}'.format(self.state), self.id)
 
         try:
-            _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
+            # _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
+            t = threading.Thread(target=self.heartbeat_and_election_timer_thread())
+            t.daemon = True
+            t.start()
             self.running = True
 
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -154,7 +162,7 @@ class Member:
         # Try to get elected leader
         if self.state == State.candidate and self.ready_to_run_for_election == True:
 
-            #lib.print_message('I am starting a new term!', self.id)
+            # lib.print_message('I am starting a new term!', self.id)
 
             # Todo Should Groupview be edited?
 
@@ -165,7 +173,7 @@ class Member:
             voters = []
             multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
             self.server_socket.sendto(
-                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, self.id, '')),
+                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, None, self.id, '')),
                 multicast_group)
 
             # Listen for messages sent directly from followers
@@ -213,19 +221,33 @@ class Member:
             try:
                 leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
                 self.server_socket.sendto(
-                    pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat, self.id, '')),
+                    pickle.dumps(Message.Message(
+                        self.term,
+                        MessageType.MessageType.heartbeat,
+                        MessageDataType.MessageType.group_membership_update if self.leader_update_group_view else None, # if leader group view has changed
+                        self.id,
+                        self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
                     leader_multicast_group)
                 self.num_heartbeats_sent += 1
                 # TODO needs to have a per-member list of the heartbeats sent. Heartbeat must also have a sequence number.
             except Exception as e2:
                 lib.print_message('Exception e2: ' + str(e2), self.id)
 
+            response_received = set()
             # Listen for heartbeat acknowledgements from followers
             while True:
                 try:
                     message, follower_address = self.server_socket.recvfrom(RECV_BYTES)
                     message = pickle.loads(message)
+                    response_received.add(message.get_member_id())
                 except socket.timeout:
+                    # getting unresponsive followers on timeout
+                    unresponsive_members = self.group_view.get_difference(response_received)
+                    if unresponsive_members:
+                        [self.group_view.remove_member(unresponsive_member) for unresponsive_member in unresponsive_members]
+                        self.leader_update_group_view = True
+                    else:
+                        self.leader_update_group_view = False
                     break
                 else:
                     if message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
@@ -246,7 +268,6 @@ class Member:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
-
             except socket.timeout:
                 break
             else:
@@ -254,13 +275,17 @@ class Member:
                     self.term = message.get_term()
                     self.voted = False
 
+                # updating group view of followers
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.group_membership_update:
+                    self.group_view = message.get_data()
+
                 if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
                     self.heartbeat_received = True
-                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, self.id, '')), sender)
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
 
                 elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
                     if self.voted is False:
-                        self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, self.id, '')), sender)
+                        self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                         self.voted = True
                         self.term = message.get_term()
 
@@ -276,7 +301,10 @@ if __name__ == "__main__":
         starting_number_of_nodes_in_group = sys.argv[2]
         starting_id = sys.argv[3]
         member = Member(starting_state, starting_number_of_nodes_in_group, starting_id)
-        _thread.start_new_thread(member.start_serving, ())
+        # _thread.start_new_thread(member.start_serving, ())
+        t = threading.Thread(target=member.start_serving()).start()
+        t.daemon = True
+        t.start()
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously

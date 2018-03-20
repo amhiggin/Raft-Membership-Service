@@ -25,7 +25,6 @@ class GroupView(object):
         for member_number in range(1, int(starting_number_of_nodes_in_group) + 1):
             self.add_member(member_number)
 
-
     # Add a member to the group view
     def add_member(self, new_member_id): #new_member):
         if not self.contains(new_member_id):
@@ -50,6 +49,9 @@ class GroupView(object):
         if self.members.__contains__(member):
             return True
         return False
+
+    def get_difference(self, members_set=set()):
+        return [item for item in self.members if item not in members_set]
 
     def get_members(self):
         return self.members

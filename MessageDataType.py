@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class MessageType(Enum):
 
         # TODO use these later once the sequence numbers are done correctly
