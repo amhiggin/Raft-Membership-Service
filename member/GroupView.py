@@ -19,17 +19,14 @@ logging.basicConfig(
 
 class GroupView(object):
 
-    def __init__(self, starting_number_of_nodes_in_group):
+    def __init__(self):
         self.members = []
-
-        for member_number in range(1, int(starting_number_of_nodes_in_group) + 1):
-            self.add_member(member_number)
 
     # Add a member to the group view
     def add_member(self, new_member_id): #new_member):
         if not self.contains(new_member_id):
             self.members.append(new_member_id)
-            #print('>> {0}\t Added member {1} to my group view'.format(lib.get_timestamp(), new_member_id))
+            print('>> {0}\t Member {1} joined'.format(lib.get_timestamp(), new_member_id))
             logging.info('Member {0} joined'.format(new_member_id))
         else:
             print('>> {0}\t Member {1} was already in my group view - did not duplicate.'.format(lib.get_timestamp(),
@@ -39,7 +36,7 @@ class GroupView(object):
     def remove_member(self, old_member):
         if self.members.__contains__(old_member):
             self.members.remove(old_member)
-            print('>> {0}\t Removed member {1} from the group view'.format(lib.get_timestamp(), old_member.name))
+            print('>> {0}\t Member {1} left'.format(lib.get_timestamp(), old_member.name))
             logging.info('Member {0} left'.format(old_member.name))
         else:
             print('>> {0}\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),

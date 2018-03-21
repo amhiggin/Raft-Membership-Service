@@ -16,7 +16,6 @@ import struct
 import logging
 import pickle
 import Message as Message
-import threading
 import MessageDataType
 
 sys.path.append("../")
@@ -41,24 +40,22 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self, state, starting_number_of_nodes_in_group, _id):
+    def __init__(self, _id):
         self.id = _id
         self.server_socket = None
+        self.state = State.follower
         self.multicast_listener_socket = None
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
         self.heartbeat_received = False
         self.ready_to_run_for_election = False
-        self.group_view = GroupView.GroupView(starting_number_of_nodes_in_group)
+        self.group_view = GroupView.GroupView()
         self.leader_update_group_view = False
         self.running = None
         self.num_heartbeats_sent = 0
         self.term = 0
         self.voted = False
-        if State.has_value(state) and state is not 'candidate':
-            self.state = State[state]
-        else:
-            self.state = DEFAULT_STATE
+        lib.print_message("Initialised", self.id)
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_and_election_timer_thread(self):
@@ -91,10 +88,7 @@ class Member:
         lib.print_message('Online in state {0}'.format(self.state), self.id)
 
         try:
-            # _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
-            t = threading.Thread(target=self.heartbeat_and_election_timer_thread())
-            t.daemon = True
-            t.start()
+            _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
             self.running = True
 
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -120,16 +114,16 @@ class Member:
             while self.running:
 
                 # If you are the leader, regularly send heartbeat messages via multicast
-                while self.state == State.leader and self.running is True:
-                        self.do_leader_message_listening()
+                if self.state == State.leader and self.running is True:
+                    self.do_leader_message_listening()
 
                 # If you are a follower, listen for heartbeat messages
-                while self.state == State.follower and self.running is True:
-                        self.do_follower_message_listening()
+                if self.state == State.follower and self.running is True:
+                    self.do_follower_message_listening()
 
                 # If you are a candidate, request votes until you are elected or detect a new leader
-                while self.state == State.candidate and self.running is True:
-                        self.do_candidate_message_listening()
+                if self.state == State.candidate and self.running is True:
+                    self.do_candidate_message_listening()
 
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
@@ -185,7 +179,7 @@ class Member:
                     if votes_received < votes_needed:
                         #lib.print_message('I was not able to get elected. Resetting election timer...', self.id)
                         self.election_timeout_point = lib.get_random_timeout()
-                        self.ready_to_run_for_election == False
+                        self.ready_to_run_for_election = False
                     break
                 else:
                     if votes_received < votes_needed and message.get_message_type() == MessageType.MessageType.vote and message.get_term() == self.term:
@@ -259,7 +253,7 @@ class Member:
         # Sleep before sending more heartbeat messages
         try:
             time.sleep(SLEEP_TIMEOUT)
-        except Exception as  e100:
+        except Exception as e100:
             lib.print_message('e100: ' + str(e100), self.id)
 
     # Listening/responding loop - follower
@@ -297,14 +291,9 @@ class Member:
 if __name__ == "__main__":
     member = None
     try:
-        starting_state = sys.argv[1]
-        starting_number_of_nodes_in_group = sys.argv[2]
         starting_id = sys.argv[3]
-        member = Member(starting_state, starting_number_of_nodes_in_group, starting_id)
-        # _thread.start_new_thread(member.start_serving, ())
-        t = threading.Thread(target=member.start_serving()).start()
-        t.daemon = True
-        t.start()
+        member = Member(starting_id)
+        _thread.start_new_thread(member.start_serving, ())
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
