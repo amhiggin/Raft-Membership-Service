@@ -1,9 +1,11 @@
 
 class Message:
 
-    def __init__(self, term, message_type, data=''):
+    def __init__(self, term, message_type, message_subtype, member_id, data=None):
         self.__term = term
         self.__message_type = message_type
+        self.__message_subtype = message_subtype
+        self.__member_id = member_id
         self.__data = data
 
     def get_term(self):
@@ -11,6 +13,12 @@ class Message:
 
     def get_message_type(self):
         return self.__message_type
+
+    def get_message_subtype(self):
+        return self.__message_subtype
+
+    def get_member_id(self):
+        return self.__member_id
 
     def get_data(self):
         return self.__data

@@ -19,33 +19,39 @@ logging.basicConfig(
 
 class GroupView(object):
 
-    def __init__(self):
+    def __init__(self, starting_number_of_nodes_in_group):
         self.members = []
 
+        for member_number in range(1, int(starting_number_of_nodes_in_group) + 1):
+            self.add_member(member_number)
+
     # Add a member to the group view
-    def add_member(self, new_member):
-        if not self.contains(new_member):
-            self.members.append(new_member)
-            print('>> {0]\t Added member {1} to the group view'.format(lib.get_timestamp(), new_member.name))
-            logging.info('Member {0} joined'.format(new_member.name))
+    def add_member(self, new_member_id): #new_member):
+        if not self.contains(new_member_id):
+            self.members.append(new_member_id)
+            #print('>> {0}\t Added member {1} to my group view'.format(lib.get_timestamp(), new_member_id))
+            logging.info('Member {0} joined'.format(new_member_id))
         else:
-            print('>> {0]\t Member {1} was already in the group view - did not duplicate.'.format(lib.get_timestamp(),
-                                                                                                  new_member.name))
+            print('>> {0}\t Member {1} was already in my group view - did not duplicate.'.format(lib.get_timestamp(),
+                                                                                                  new_member_id))
 
     # Remove a member from the group view
     def remove_member(self, old_member):
         if self.members.__contains__(old_member):
             self.members.remove(old_member)
-            print('>> {0]\t Removed member {1} from the group view'.format(lib.get_timestamp(), old_member.name))
+            print('>> {0}\t Removed member {1} from the group view'.format(lib.get_timestamp(), old_member.name))
             logging.info('Member {0} left'.format(old_member.name))
         else:
-            print('>> {0]\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),
+            print('>> {0}\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),
                                                                                                     old_member.name))
 
     def contains(self, member):
         if self.members.__contains__(member):
             return True
         return False
+
+    def get_difference(self, members_set=set()):
+        return [item for item in self.members if item not in members_set]
 
     def get_members(self):
         return self.members

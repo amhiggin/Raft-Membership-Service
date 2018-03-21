@@ -13,11 +13,14 @@ import GroupView as GroupView
 from State import State
 import time
 import struct
-import random
 import logging
 import pickle
 import Message as Message
+import threading
+import MessageDataType
+
 sys.path.append("../")
+sys.path.append(".")
 
 logging.basicConfig(
     filename="DistributedManagementSystem.log",
@@ -38,12 +41,16 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self, state, _id):
+    def __init__(self, state, starting_number_of_nodes_in_group, _id):
         self.id = _id
         self.server_socket = None
+        self.multicast_listener_socket = None
         self.heartbeat_timeout_point = None
+        self.election_timeout_point = None
         self.heartbeat_received = False
-        self.group_view = GroupView.GroupView()
+        self.ready_to_run_for_election = False
+        self.group_view = GroupView.GroupView(starting_number_of_nodes_in_group)
+        self.leader_update_group_view = False
         self.running = None
         self.num_heartbeats_sent = 0
         self.term = 0
@@ -54,8 +61,10 @@ class Member:
             self.state = DEFAULT_STATE
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
-    def heartbeat_timer_thread(self):
+    def heartbeat_and_election_timer_thread(self):
+
         self.heartbeat_timeout_point = lib.get_random_timeout()
+        self.election_timeout_point = lib.get_random_timeout()
 
         while self.running is True:
             if self.state == State.follower:
@@ -69,141 +78,216 @@ class Member:
                     if time.time() > self.heartbeat_timeout_point:
                         lib.print_message('Heartbeat timeout - I am now a candidate', self.id)
                         self.state = State.candidate
-            elif self.state == State.leader:
-                try:
-                    message, follower_address = self.server_socket.recvfrom(RECV_BYTES)
-                    message = pickle.loads(message)
-                    if message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
-                        lib.print_message('Heartbeat ACK received from ' + follower_address, self.id)
-                        if not self.group_view.contains(follower_address):
-                            self.group_view.add_member(follower_address)
-                except Exception as e:
-                    lib.handle_timeout_exception(e)
+                        self.ready_to_run_for_election = True
+
+            elif self.state == State.candidate:
+                time.sleep(SLEEP_TIMEOUT)
+                if time.time() > self.election_timeout_point and self.ready_to_run_for_election == False:
+                    lib.print_message('Election timeout - I am going to start a new term', self.id)
+                    self.ready_to_run_for_election = True
 
     # Startup node, configure socket
     def start_serving(self):
         lib.print_message('Online in state {0}'.format(self.state), self.id)
 
         try:
-            _thread.start_new_thread(self.heartbeat_timer_thread, ())
+            # _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
+            t = threading.Thread(target=self.heartbeat_and_election_timer_thread())
+            t.daemon = True
+            t.start()
             self.running = True
 
-            while self.running:
-                self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # Set timeout so the socket does not block indefinitely while trying to receive data
-                self.server_socket.settimeout(0.2)
-                self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.server_socket.settimeout(0.2)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Set the time-to-live for messages to 1 so they do not go further than the local network segment
+            self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
 
-                follower_address = ('', MULTICAST_PORT)
-                self.server_socket.bind(follower_address)
+            self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.multicast_listener_socket.settimeout(0.2)
+            self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            follower_address = ('', MULTICAST_PORT)
+            self.multicast_listener_socket.bind(follower_address)
+            # Set the time-to-live for messages to 1 so they do not go further than the local network segment
+            self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+
+            # Add the socket to the multicast group
+            group = socket.inet_aton(MULTICAST_ADDRESS)
+            mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+            self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+            while self.running:
 
                 # If you are the leader, regularly send heartbeat messages via multicast
-                if self.state == State.leader:
-                    # Set the time-to-live for messages to 1 so they do not go further than the local network segment
-                    self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
-
-                    # Send heartbeat messages
-                    while self.state == State.leader and self.running is True:
-                        lib.print_message('Sending heartbeats', self.id)
-                        try:
-                            leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
-                            self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat, '')), leader_multicast_group)
-                            self.num_heartbeats_sent += 1
-                            # TODO needs to have a per-member list of the heartbeats sent. Heartbeat must also have a sequence number.
-                        except Exception as e2:
-                            lib.print_message('Exception e2: ' + str(e2), self.id)
-
-                        # Shut down after sending a certain number of heartbeats, so that the followers will timeout
-                        #if self.num_heartbeats_sent >= 3:
-                        #lib.print_message('Leader stepping down!', id)
-                        #self.state = State.follower
-                        #self.num_heartbeats_sent = 0
-                        #self.heartbeat_timeout_point = time.time() + 10
-
-                        #lib.print_message('Leader shutting down!', id)
-                        #self.running = False
-
-                        time.sleep(SLEEP_TIMEOUT * 2)
+                while self.state == State.leader and self.running is True:
+                        self.do_leader_message_listening()
 
                 # If you are a follower, listen for heartbeat messages
-                if self.state == State.follower:
-
-                    # Add the socket to the multicast group
-                    group = socket.inet_aton(MULTICAST_ADDRESS)
-                    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
-                    self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-                    while self.state == State.follower and self.running is True:
+                while self.state == State.follower and self.running is True:
                         self.do_follower_message_listening()
 
-                if self.state == State.candidate:
-                    # Request votes through broadcast message
-                    votes_needed = (self.group_view.get_size() / 2) + 1
-                    votes_received = 1  # Start by voting for itself
-                    voters = []
-                    multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
-                    self.term += 1
-                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, '')), multicast_group)
+                # If you are a candidate, request votes until you are elected or detect a new leader
+                while self.state == State.candidate and self.running is True:
+                        self.do_candidate_message_listening()
 
-                    # Loop - wait for votes
-                    # Todo Should Groupview be edited?
-                    while self.state == State.candidate and self.running is True:
-                        try:
-                            message, address = self.server_socket.recvfrom(RECV_BYTES)
-                            message = pickle.loads(message)
-
-                            if votes_received >= votes_needed:
-                                lib.print_message('Sufficient votes received - I am now a leader', self.id)
-                                self.state = State.leader
-                            elif message.get_message_type() == MessageType.MessageType.vote and message.get_term() == self.term:
-                                lib.print_message('Vote received from ' + address, self.id)
-                                if not voters.__contains__(address):
-                                    voters.append(address)
-                                    votes_received += 1
-                                if votes_received >= votes_needed:
-                                    lib.print_message('Sufficient votes received - I am now a leader', self.id)
-                                    self.state = State.leader
-                            elif message.get_term > self.term:
-                                lib.print_message('My term is outdated - I am now a follower', self.id)
-                                self.state = State.follower
-                            elif message.get_message_type() == MessageType.MessageType.heartbeat:
-                                lib.print_message('Other leader found - I am now a follower', self.id)
-                                self.state = State.follower
-                                self.term = message.get_term()
-                        except Exception as e4:
-                            lib.handle_timeout_exception(e4)
-                            lib.print_message("Candidate timeout", self.id)
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
         finally:
             sys.exit(1)
 
-    # Loop - listen for heartbeats, as long as you are a follower
-    def do_follower_message_listening(self):
-        try:
-            message, sender = self.server_socket.recvfrom(RECV_BYTES)
-            message = pickle.loads(message)
+    # Listening/responding loop - candidate
+    def do_candidate_message_listening(self):
 
-            if message.get_term() > self.term:
-                self.term = message.get_term()
-                self.voted = False
+        # Listen for multicast messages from other candidates and leaders (NB: Multicast senders also receive their own messages)
+        while True:  # Listen until you timeout (i.e. there are no more messages)
+            try:
+                message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
+            except socket.timeout:
+                break
+            else:
+                if message.get_term() > self.term and message.get_message_type() == MessageType.MessageType.vote_request:
+                    lib.print_message('Candidate: My term is < than that of candidate ' + message.get_member_id() + ' - I am now a follower',
+                                      self.id)
+                    self.state = State.follower
+                    self.term = message.get_term()
 
-            if message.get_message_type() == MessageType.MessageType.heartbeat:
-                lib.print_message('Received heartbeat', self.id)
-                self.heartbeat_received = True
+                elif message.get_term() >= self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
+                    lib.print_message(
+                        'Candidate: My term is >= that of leader ' + message.get_member_id() + ' - I am now a follower',
+                        self.id)
+                    self.state = State.follower
+
+        # Try to get elected leader
+        if self.state == State.candidate and self.ready_to_run_for_election == True:
+
+            # lib.print_message('I am starting a new term!', self.id)
+
+            # Todo Should Groupview be edited?
+
+            # Request votes through broadcast message
+            self.term += 1
+            votes_needed = (self.group_view.get_size() // 2) + 1
+            votes_received = 1  # Start by voting for itself
+            voters = []
+            multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+            self.server_socket.sendto(
+                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, None, self.id, '')),
+                multicast_group)
+
+            # Listen for messages sent directly from followers
+            while True:  # Listen until you timeout (i.e. there are no more messages)
+                try:
+                    message, address = self.server_socket.recvfrom(RECV_BYTES)
+                    message = pickle.loads(message)
+                except socket.timeout:
+                    if votes_received < votes_needed:
+                        #lib.print_message('I was not able to get elected. Resetting election timer...', self.id)
+                        self.election_timeout_point = lib.get_random_timeout()
+                        self.ready_to_run_for_election == False
+                    break
+                else:
+                    if votes_received < votes_needed and message.get_message_type() == MessageType.MessageType.vote and message.get_term() == self.term:
+                        #lib.print_message('Vote received from Member ' + message.get_member_id() + ' at ' + str(address), self.id)
+                        # if not voters.__contains__(address):
+                        #   voters.append(address)
+                        #    votes_received += 1
+                        votes_received += 1
+                        if votes_received >= votes_needed:
+                            lib.print_message('Sufficient votes received - I am now a leader', self.id)
+                            self.state = State.leader
+
+    # Listening/responding loop - leader
+    def do_leader_message_listening(self):
+
+        # Listen for multicast messages from candidates and other leaders (NB: Multicast senders also receive their own messages)
+        while True:
+            try:
+                message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
+            except socket.timeout:
+                break
+            else:
+                if message.get_term() > self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
+                    lib.print_message('Leader: my term is < than that of leader ' + message.get_member_id() + ' - I am now a follower',self.id)
+                    self.state = State.follower
+                    self.term = message.get_term()
+                    break
+
+        # Multicast heartbeat messages for followers
+        if self.state == State.leader:
+            lib.print_message('Sending heartbeats', self.id)
+            try:
+                leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
                 self.server_socket.sendto(
-                    pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '')), sender)
-                lib.print_message('Sent heartbeat_ack', self.id)
+                    pickle.dumps(Message.Message(
+                        self.term,
+                        MessageType.MessageType.heartbeat,
+                        MessageDataType.MessageType.group_membership_update if self.leader_update_group_view else None, # if leader group view has changed
+                        self.id,
+                        self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
+                    leader_multicast_group)
+                self.num_heartbeats_sent += 1
+                # TODO needs to have a per-member list of the heartbeats sent. Heartbeat must also have a sequence number.
+            except Exception as e2:
+                lib.print_message('Exception e2: ' + str(e2), self.id)
 
-            elif message.get_message_type() == MessageType.MessageType.vote_request:
-                if message.get_term() == self.term or (message.get_term() == self.term and self.voted is False):
-                    self.server_socket.sendto(
-                        pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, '')), sender)
-                    self.voted = True
-                    # self.server_socket.sendto('ack'.encode(), leader_address)  # Send acknowledgement
-        except Exception as e3:
-            if str(e3) == 'timed out':
-                pass  # Continue
+            response_received = set()
+            # Listen for heartbeat acknowledgements from followers
+            while True:
+                try:
+                    message, follower_address = self.server_socket.recvfrom(RECV_BYTES)
+                    message = pickle.loads(message)
+                    response_received.add(message.get_member_id())
+                except socket.timeout:
+                    # getting unresponsive followers on timeout
+                    unresponsive_members = self.group_view.get_difference(response_received)
+                    if unresponsive_members:
+                        [self.group_view.remove_member(unresponsive_member) for unresponsive_member in unresponsive_members]
+                        self.leader_update_group_view = True
+                    else:
+                        self.leader_update_group_view = False
+                    break
+                else:
+                    if message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
+                        lib.print_message('Heartbeat ACK received from Member ' + str(message.get_member_id() + ' at ' + str(follower_address)), self.id)
+                        # lib.print_message('Heartbeat ACK received from ' + str(follower_address), self.id)
+                        # if not self.group_view.contains(follower_address):
+                        #    self.group_view.add_member(follower_address)
+
+        # Sleep before sending more heartbeat messages
+        try:
+            time.sleep(SLEEP_TIMEOUT)
+        except Exception as  e100:
+            lib.print_message('e100: ' + str(e100), self.id)
+
+    # Listening/responding loop - follower
+    def do_follower_message_listening(self):
+        while True:
+            try:
+                message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
+            except socket.timeout:
+                break
+            else:
+                if message.get_term() > self.term and message.get_member_id() != str(self.id):
+                    self.term = message.get_term()
+                    self.voted = False
+
+                # updating group view of followers
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.group_membership_update:
+                    self.group_view = message.get_data()
+
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
+                    self.heartbeat_received = True
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
+
+                elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
+                    if self.voted is False:
+                        self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
+                        self.voted = True
+                        self.term = message.get_term()
 
     def respond_to_client_request(self, client_message):
         # TODO implement this
@@ -214,8 +298,13 @@ if __name__ == "__main__":
     member = None
     try:
         starting_state = sys.argv[1]
-        member = Member(starting_state, random.randint(0, 100))
-        _thread.start_new_thread(member.start_serving, ())
+        starting_number_of_nodes_in_group = sys.argv[2]
+        starting_id = sys.argv[3]
+        member = Member(starting_state, starting_number_of_nodes_in_group, starting_id)
+        # _thread.start_new_thread(member.start_serving, ())
+        t = threading.Thread(target=member.start_serving()).start()
+        t.daemon = True
+        t.start()
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
