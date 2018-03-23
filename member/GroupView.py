@@ -9,14 +9,6 @@ import logging, sys
 sys.path.append("../")
 import MemberLib as lib
 
-
-logging.basicConfig(
-    filename="DistributedManagementSystem.log",
-    level=logging.INFO,
-    format="%(asctime)s:%(levelname)s:%(message)s"
-)
-
-
 class GroupView(object):
 
     def __init__(self):
@@ -26,21 +18,21 @@ class GroupView(object):
     def add_member(self, new_member_id): #new_member):
         if not self.contains(new_member_id):
             self.members.append(new_member_id)
-            print('>> {0}\t Member {1} joined'.format(lib.get_timestamp(), new_member_id))
-            logging.info('Member {0} joined'.format(new_member_id))
+            return True
         else:
             print('>> {0}\t Member {1} was already in my group view - did not duplicate.'.format(lib.get_timestamp(),
                                                                                                   new_member_id))
+            return False
 
     # Remove a member from the group view
-    def remove_member(self, old_member):
-        if self.members.__contains__(old_member):
-            self.members.remove(old_member)
-            print('>> {0}\t Member {1} left'.format(lib.get_timestamp(), old_member.name))
-            logging.info('Member {0} left'.format(old_member.name))
+    def remove_member(self, old_member_id):
+        if self.members.__contains__(old_member_id):
+            self.members.remove(old_member_id)
+            return True
         else:
             print('>> {0}\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),
-                                                                                                    old_member.name))
+                                                                                                    old_member_id))
+            return False
 
     def contains(self, member):
         if self.members.__contains__(member):

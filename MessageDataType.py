@@ -8,6 +8,9 @@ class MessageType(Enum):
         message_resend_response = 1
         group_membership_update = 2
 
+        addition_of_outsider = 5
+        removal_of_follower = 6
+
         # Heartbeat ACK sub-messages
         new_id = 8
         message_resend_request = 3

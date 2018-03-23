@@ -8,3 +8,5 @@ class MessageType(Enum):
         service = 3             # Client service request
         vote_request = 4        # Candidate requesting votes
         vote = 5                # Follower vote
+        join_request = 6        # Request to join the group
+        join_acceptance = 7     # Leader confirming to new member that they have been accepted into the group
