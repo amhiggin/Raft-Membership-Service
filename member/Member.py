@@ -30,6 +30,8 @@ SERVER_PORT = 45678  # Review
 DEFAULT_STATE = State.follower
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 45678
+PARTITION_MULTICAST_PORT = 45679
+PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
 
 ''' Generic constants '''
 RECV_BYTES = 1024
@@ -38,7 +40,7 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self,_id, group_founder):
+    def __init__(self,_id, group_founder, partition_timer=0):
         self.id = _id
         self.server_socket = None
 
@@ -81,7 +83,7 @@ class Member:
 
         self.TEST_NUMBER_OF_ACKS_SENT = 0
 
-
+        self.partition_timer = partition_timer #milliseconds
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_and_election_timer_thread(self):
@@ -108,6 +110,11 @@ class Member:
                 if self.ready_to_run_for_election == False and time.time() > self.election_timeout_point:
                     lib.print_message('Election timeout - I am going to start a new term', self.id)
                     self.ready_to_run_for_election = True
+
+    def network_partition_thread(self):
+        time.sleep(self.partition_timer)
+        follower_address = ('', MULTICAST_PORT)
+        
 
     # Startup node, configure socket
     def start_serving(self):
@@ -143,6 +150,11 @@ class Member:
             self.server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
+            #network partition thread
+            if self.partition_timer != 0:
+                _thread.start_new_thread(self.network_partition_thread, ())
+
+            
             while self.running:
 
                 # If you are the leader, regularly send heartbeat messages via multicast
