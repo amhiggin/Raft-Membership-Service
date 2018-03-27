@@ -56,7 +56,7 @@ class Member:
         if group_founder is True:
             self.state = State.leader
             self.group_view.add_member(self.id)
-            logging.info('Member {0} founded group'.format(self.id))
+            logging.info('Log 1: Member {0} founded group'.format(self.id))
             self.index_of_latest_uncommitted_log += 1
             self.index_of_latest_committed_log += 1
         else:
@@ -79,8 +79,8 @@ class Member:
 
         self.uncommitted_log_entries = []
 
-        self.TEST_NUMBER_OF_ACKS_SENT = 0
-
+        self.messageDataType_of_previous_message = None
+        self.messageData_of_previous_message = None
 
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
@@ -235,9 +235,6 @@ class Member:
 
             # lib.print_message('I am starting a new term!', self.id)
 
-            # Todo Should Groupview be edited?
-
-
             # Request votes through broadcast message
             self.term += 1
             votes_needed = (self.group_view.get_size() // 2) + 1
@@ -246,7 +243,7 @@ class Member:
 
             multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
             self.server_socket.sendto(
-                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, None, self.id, '')),
+                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, None, self.id, '', None, self.index_of_latest_committed_log)),
                 multicast_group)
 
             # Listen for votes until your election time is up, or you receive enough votes to become leader
@@ -272,6 +269,15 @@ class Member:
                             lib.print_message('Sufficient votes received - I am now a leader', self.id)
                             self.state = State.leader
                             running_for_election = False
+
+                            # Create a new log entry, but don't commit it yet
+                            self.index_of_latest_uncommitted_log += 1
+                            new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + str(self.id) + ' was elected leader')
+                            self.uncommitted_log_entries.append(new_log_entry)
+
+                            # Send the confirmation out to followers
+                            self.messageDataType_of_previous_message = MessageDataType.MessageType.new_leader_elected
+                            self.messageData_of_previous_message = str(self.id)
 
                     if time.time() > self.election_timeout_point:
                         running_for_election = False
@@ -309,28 +315,59 @@ class Member:
 
                 removing_a_follower = False
                 adding_an_outsider = False
+                announcing_ascension_to_leadership = False
 
-                if len(self.unresponsive_followers) > 0:
+                if self.index_of_latest_uncommitted_log > self.index_of_latest_committed_log:
+
+                    # Do not create a new log entry, since there already is an uncommitted entry for this log
+                    if self.messageDataType_of_previous_message == MessageDataType.MessageType.removal_of_follower:
+                        lib.print_message('I will retry removing a follower', self.id)
+                        messageDataType = MessageDataType.MessageType.removal_of_follower
+                    elif self.messageDataType_of_previous_message == MessageDataType.MessageType.addition_of_outsider:
+                        lib.print_message('I will retry adding an outsider', self.id)
+                        messageDataType = MessageDataType.MessageType.addition_of_outsider
+                    elif self.messageDataType_of_previous_message == MessageDataType.MessageType.new_leader_elected:
+                        lib.print_message('I will announce/re-announce my ascension to leadership', self.id)
+                        messageDataType = MessageDataType.MessageType.new_leader_elected
+                    else:
+                        messageDataType = None
+
+                    messageData = str(self.messageData_of_previous_message)
+
+                    if messageDataType == MessageDataType.MessageType.removal_of_follower:
+                        removing_a_follower = True
+                    elif messageDataType == MessageDataType.MessageType.addition_of_outsider:
+                        adding_an_outsider = True
+                    elif messageDataType == MessageDataType.MessageType.new_leader_elected:
+                        announcing_ascension_to_leadership = True
+
+                elif len(self.unresponsive_followers) > 0:
                     messageDataType = MessageDataType.MessageType.removal_of_follower
+                    self.messageDataType_of_previous_message = MessageDataType.MessageType.removal_of_follower
 
                     # Create new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     self.uncommitted_log_entries += (self.index_of_latest_uncommitted_log, 'Member ' + self.unresponsive_followers[0] + ' left')
                     messageData = self.unresponsive_followers[0]
+                    self.messageData_of_previous_message = self.unresponsive_followers[0]
                     removing_a_follower = True
+
                 elif len(self.outsiders_waiting_to_join) > 0:
                     messageDataType = MessageDataType.MessageType.addition_of_outsider
+                    self.messageDataType_of_previous_message = MessageDataType.MessageType.removal_of_follower
 
                     # Create new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     self.uncommitted_log_entries += (self.index_of_latest_uncommitted_log, 'Member ' + self.outsiders_waiting_to_join[0] + ' joined')
                     messageData = self.outsiders_waiting_to_join[0]
+                    self.messageData_of_previous_message = self.outsiders_waiting_to_join[0]
                     adding_an_outsider = True
                 else:
                     messageDataType = None
+                    self.messageDataType_of_previous_message = None
                     messageData = ''
+                    self.messageData_of_previous_message = ''
 
-                #messageDataType = MessageDataType.MessageType.group_membership_update if self.leader_update_group_view else None # if leader group view has changed
 
                 lib.print_message('Sending heartbeats', self.id)
 
@@ -354,6 +391,8 @@ class Member:
                 responses_needed_to_commit_removal_of_follower = (self.group_view.get_size() // 2) + 1
             elif adding_an_outsider is True:
                 responses_needed_to_commit_addition_of_outsider = (self.group_view.get_size() // 2) + 1
+            elif announcing_ascension_to_leadership is True:
+                responses_needed_to_commit_ascension_to_leadership = (self.group_view.get_size() // 2) + 1
 
             # Add self to list of responders - leader acts as if its responds to its own messages
             response_received = set(self.id)
@@ -396,7 +435,7 @@ class Member:
                     self.group_view.remove_member(follower_to_remove)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
-                    logging.info('Member {0} left'.format(follower_to_remove))
+                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} left'.format(follower_to_remove))
                     self.index_of_latest_committed_log += 1
 
                     # Remove the old follower from the list of followers to be removed
@@ -414,7 +453,7 @@ class Member:
                     self.group_view.add_member(new_member)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
-                    logging.info('Member {0} joined the group'.format(new_member))
+                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} joined the group'.format(new_member))
                     self.index_of_latest_committed_log += 1
 
                     # Message the new member to tell them they have joined
@@ -436,6 +475,18 @@ class Member:
 
                 else:
                     lib.print_message('I did not get enough responses to commit to the addition of the outsider', self.id)
+
+            elif announcing_ascension_to_leadership is True:
+                if len(response_received) >= responses_needed_to_commit_ascension_to_leadership:
+
+                    lib.print_message('Committing my ascension to leadership', self.id)
+
+                    # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
+                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} was elected leader'.format(self.id))
+                    self.index_of_latest_committed_log += 1
+
+                else:
+                    lib.print_message('I did not get enough responses to commit my ascension to leader', self.id)
 
         # Sleep before sending more heartbeat messages
         try:
@@ -461,28 +512,39 @@ class Member:
                 #     self.group_view = message.get_data()
 
                 # A follower might be removed from the group
-                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.removal_of_follower:
+                # Do not create a new log entry if this is a re-transmission from the leader (i.e. the leader already sent a message about this, but didn't get enough responses to commit it)
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.removal_of_follower \
+                        and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
+
                     # Create a new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' left')
                     self.uncommitted_log_entries.append(new_log_entry)
 
                 # An outsider might be added to the group
-                elif message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.addition_of_outsider:
+                # Do not create a new log entry if this is a re-transmission from the leader (i.e. the leader already sent a message about this, but didn't get enough responses to commit it)
+                elif message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.addition_of_outsider \
+                        and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
 
                     # Create a new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' joined the group')
                     self.uncommitted_log_entries.append(new_log_entry)
 
+                # A new leader has been elected
+                # Do not create a new log entry if this is a re-transmission from the leader (i.e. the leader already sent a message about this, but didn't get enough responses to commit it)
+                elif message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.new_leader_elected \
+                        and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
+
+                    # Create a new log entry, but don't commit it yet
+                    self.index_of_latest_uncommitted_log += 1
+                    new_log_entry = (
+                    self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' was elected leader')
+                    self.uncommitted_log_entries.append(new_log_entry)
+
                 if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
                     self.heartbeat_received = True
-                    if self.TEST_NUMBER_OF_ACKS_SENT == 3 and self.id == str(3):    # Member 3 only
-                        lib.print_message('FAILURE TEST: I am not going to send this ack', self.id)
-                    else:
-                        self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
-
-                    self.TEST_NUMBER_OF_ACKS_SENT += 1
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
 
                     # If the leader has committed a log entry but you have not, then commit it
                     if message.get_index_of_latest_commited_log() > self.index_of_latest_committed_log:
@@ -492,7 +554,7 @@ class Member:
                         for uncommitted_log_entry in self.uncommitted_log_entries:
                             entry_id = uncommitted_log_entry[0]
                             if entry_id <= message.get_index_of_latest_commited_log():
-                                new_entry_text = uncommitted_log_entry[1]
+                                new_entry_text = "Log " + str(entry_id) + ": " + uncommitted_log_entry[1]
                                 logging.info(new_entry_text)
 
                                 entries_to_remove.append(uncommitted_log_entry)
@@ -513,7 +575,7 @@ class Member:
                             self.state = State.outsider
 
                 elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
-                    if self.voted is False:
+                    if self.voted is False and message.get_index_of_latest_commited_log() >= self.index_of_latest_committed_log:
                         self.term = message.get_term()
                         self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                         self.voted = True

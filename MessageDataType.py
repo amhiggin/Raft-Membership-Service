@@ -11,6 +11,8 @@ class MessageType(Enum):
         addition_of_outsider = 5
         removal_of_follower = 6
 
+        new_leader_elected = 7
+
         # Heartbeat ACK sub-messages
         new_id = 8
         message_resend_request = 3
