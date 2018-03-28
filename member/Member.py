@@ -8,18 +8,18 @@
 import _thread, sys
 import socket
 import MemberLib as lib
-from DistributedManagementSystem import MessageType
-#from MessageType import MessageType
+#from DistributedManagementSystem import MessageType
+from MessageType import MessageType
 import GroupView as GroupView
 from State import State
 import time
 import struct
 import logging
 import pickle
-from DistributedManagementSystem import Message as Message
-#import Message as Message
-from DistributedManagementSystem import MessageDataType
-#import MessageDataType
+#from DistributedManagementSystem import Message as Message
+import Message as Message
+#from DistributedManagementSystem import MessageDataType
+import MessageDataType
 import os
 
 sys.path.append("../")
