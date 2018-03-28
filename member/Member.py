@@ -30,6 +30,7 @@ SERVER_PORT = 45678  # Review
 DEFAULT_STATE = State.State.follower
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 45678
+CLIENT_LISTENING_PORT = 56789
 
 ''' Generic constants '''
 RECV_BYTES = 1024
@@ -63,6 +64,7 @@ class Member:
             self.state = State.State.outsider
 
         self.multicast_listener_socket = None
+        self.client_listener_socket = None
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
         self.heartbeat_received = False
@@ -81,7 +83,9 @@ class Member:
 
         self.TEST_NUMBER_OF_ACKS_SENT = 0
 
-
+    def do_exit_behaviour(self):
+        self.group_view.erase()
+        logging.shutdown()
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_and_election_timer_thread(self):
@@ -163,7 +167,43 @@ class Member:
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
         finally:
-            do_exit_behaviour(self)
+            self.do_exit_behaviour()
+            sys.exit(1)
+
+    # Start listening for client requests
+    def listen_for_client(self):
+        # Set up a dedicated socket, that will not time out, for listening for client requests
+        self.client_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.client_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        follower_address = ('', CLIENT_LISTENING_PORT)
+        self.client_listener_socket.bind(follower_address)
+        self.client_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+
+        # Add the socket to the multicast group
+        group = socket.inet_aton(MULTICAST_ADDRESS)
+        mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+        self.client_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+        try:
+            while self.running:
+                incoming_message, sender = self.client_listener_socket.recvfrom(RECV_BYTES)
+                decoded_message = pickle.loads(incoming_message)
+                if decoded_message.get_message_type() is MessageType.MessageType.service_request:
+                    # Return your group view
+                    self.server_socket.sendto(pickle.dumps(Message.Message(
+                        self.term,
+                        MessageType.MessageType.service_response,
+                        None,
+                        self.id,
+                        None,
+                        self.index_of_latest_uncommitted_log,
+                        self.index_of_latest_committed_log,
+                        self.group_view)), sender)
+                    lib.print_message("Sent group view to client {0}".format(sender), self.id)
+        except Exception as client_listen_exception:
+            lib.print_message("Exception occurred when listening for client")
+        finally:
             sys.exit(1)
 
     # Listening/responding loop - outsider
@@ -235,15 +275,11 @@ class Member:
         if self.state is State.State.candidate and self.ready_to_run_for_election is True:
 
             # lib.print_message('I am starting a new term!', self.id)
-
-            # Todo Should Groupview be edited?
-
-
             # Request votes through broadcast message
             self.term += 1
             votes_needed = (self.group_view.get_size() // 2) + 1
             votes_received = 1  # Start by voting for itself
-            voters = []
+            #voters = []
 
             multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
             self.server_socket.sendto(
@@ -284,7 +320,6 @@ class Member:
 
     # Listening/responding loop - leader
     def do_leader_message_listening(self):
-
         # Listen for multicast messages from candidates and other leaders (NB: Multicast senders also receive their own messages)
         while True:
             try:
@@ -312,26 +347,26 @@ class Member:
                 adding_an_outsider = False
 
                 if len(self.unresponsive_followers) > 0:
-                    messageDataType = MessageDataType.MessageType.removal_of_follower
+                    message_data_type = MessageDataType.MessageType.removal_of_follower
 
                     # Create new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     self.uncommitted_log_entries += (self.index_of_latest_uncommitted_log, 'Member ' + self.unresponsive_followers[0] + ' left')
-                    messageData = self.unresponsive_followers[0]
+                    message_data = self.unresponsive_followers[0]
                     removing_a_follower = True
                 elif len(self.outsiders_waiting_to_join) > 0:
-                    messageDataType = MessageDataType.MessageType.addition_of_outsider
+                    message_data_type = MessageDataType.MessageType.addition_of_outsider
 
                     # Create new log entry, but don't commit it yet
                     self.index_of_latest_uncommitted_log += 1
                     self.uncommitted_log_entries += (self.index_of_latest_uncommitted_log, 'Member ' + self.outsiders_waiting_to_join[0] + ' joined')
-                    messageData = self.outsiders_waiting_to_join[0]
+                    message_data = self.outsiders_waiting_to_join[0]
                     adding_an_outsider = True
                 else:
-                    messageDataType = None
-                    messageData = ''
+                    message_data_type = None
+                    message_data = ''
 
-                #messageDataType = MessageDataType.MessageType.group_membership_update if self.leader_update_group_view else None # if leader group view has changed
+                #message_data_type = MessageDataType.MessageType.group_membership_update if self.leader_update_group_view else None # if leader group view has changed
 
                 lib.print_message('Sending heartbeats', self.id)
 
@@ -339,9 +374,9 @@ class Member:
                     pickle.dumps(Message.Message(
                         self.term,
                         MessageType.MessageType.heartbeat,
-                        messageDataType,
+                        message_data_type,
                         self.id,
-                        messageData,
+                        message_data,
                         self.index_of_latest_uncommitted_log,
                         self.index_of_latest_committed_log,
                         self.group_view)),
@@ -531,15 +566,6 @@ class Member:
         #         lib.print_message('I have been removed from the group', self.id)
         #         self.state = State.State.outsider
 
-    def respond_to_client_request(self, client_message):
-        # TODO implement this
-        pass
-
-
-def do_exit_behaviour(member):
-    member.group_view.erase()
-    logging.shutdown()
-
 
 if __name__ == "__main__":
     member = None
@@ -552,10 +578,11 @@ if __name__ == "__main__":
         starting_id = sys.argv[2]
         member = Member(starting_id, group_founder)
         _thread.start_new_thread(member.start_serving, ())
+        _thread.start_new_thread(member.listen_for_client, ())
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
     except KeyboardInterrupt as main_exception:
-        do_exit_behaviour(member)
+        member.do_exit_behaviour()
         exit(0)
 

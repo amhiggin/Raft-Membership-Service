@@ -17,6 +17,7 @@ def main(socket_port):
     lib.print_message('Hello world from client')
     running = True
     self_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    self_socket.bind(('', 12345))
     self_socket.settimeout(TIMEOUT_PERIOD_SECONDS)
 
     while running:
@@ -24,11 +25,11 @@ def main(socket_port):
         try:
             user_input = raw_input(DISPLAY_USER_OPTIONS)
             if user_input == "1":
-                response = lib.send_request(self_socket)
-                if response is None:
+                group_view = lib.send_request(self_socket)
+                if group_view is None:
                     lib.print_message("No response after {0} seconds".format(TIMEOUT_PERIOD_SECONDS))
                 else:
-                    lib.print_message("Group response: There are {0} members in the group".format(response))
+                    lib.print_message("Group response: The group view is {0}".format(group_view))
             elif user_input == 'x':
                 running = False
             else:
