@@ -8,18 +8,18 @@
 import _thread, sys
 import socket
 import MemberLib as lib
-#from DistributedManagementSystem import MessageType
-import MessageType
+from DistributedManagementSystem import MessageType
+#from MessageType import MessageType
 import GroupView as GroupView
 from State import State
 import time
 import struct
 import logging
 import pickle
-#from DistributedManagementSystem import Message as Message
-import Message as Message
-#from DistributedManagementSystem import MessageDataType
-import MessageDataType
+from DistributedManagementSystem import Message as Message
+#import Message as Message
+from DistributedManagementSystem import MessageDataType
+#import MessageDataType
 import os
 
 sys.path.append("../")
@@ -83,8 +83,7 @@ class Member:
 
         self.TEST_NUMBER_OF_ACKS_SENT = 0
 
-        self.partition_timer = partition_timer #milliseconds
-
+        self.partition_timer = partition_timer
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_and_election_timer_thread(self):
 
@@ -112,9 +111,26 @@ class Member:
                     self.ready_to_run_for_election = True
 
     def network_partition_thread(self):
+        print('Node ' + self.id + ' is sleeping.\n')
         time.sleep(self.partition_timer)
+        print('Node ' + self.id + ' is awake.\n')
+        #self.multicast_listener_socket.close()
+        global MULTICAST_ADDRESS
+        global MULTICAST_PORT
+        global PARTITION_MULTICAST_ADDRESS
+        global PARTITION_MULTICAST_PORT
+        #print('Node multicast port closed.\n')
+        MULTICAST_ADDRESS = PARTITION_MULTICAST_ADDRESS
+        MULTICAST_PORT = PARTITION_MULTICAST_PORT
+        print('Node multicast port and address changed.\n')
+        self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.multicast_listener_socket.settimeout(0.2)
+        self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         follower_address = ('', MULTICAST_PORT)
-        
+        self.multicast_listener_socket.bind(follower_address)
+        # Set the time-to-live for messages to 1 so they do not go further than the local network segment
+        self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+        print('Node partitioned.\n')
 
     # Startup node, configure socket
     def start_serving(self):
@@ -152,6 +168,7 @@ class Member:
 
             #network partition thread
             if self.partition_timer != 0:
+                print('Starting network partition timer')
                 _thread.start_new_thread(self.network_partition_thread, ())
 
             
@@ -555,8 +572,9 @@ if __name__ == "__main__":
             group_founder = False
 
         starting_id = sys.argv[2]
-
-        member = Member(starting_id, group_founder)
+        partition_timer = int(sys.argv[3])
+        #print('Node ' + starting_id + ': partition timer = ' + partition_timer+'.\n')
+        member = Member(starting_id, group_founder, partition_timer)
         _thread.start_new_thread(member.start_serving, ())
 
         while 1:
