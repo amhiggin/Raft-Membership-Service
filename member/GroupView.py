@@ -42,6 +42,11 @@ class GroupView(object):
     def get_difference(self, members_set=set()):
         return [item for item in self.members if item not in members_set]
 
+    def exists_difference(self, members_set=set()):
+        if ([item for item in self.members if item not in members_set]) is None:
+            return True
+        return False
+
     def get_members(self):
         return self.members
 

@@ -11,3 +11,5 @@ class MessageType(Enum):
         vote = 6                # Follower vote
         join_request = 7        # Request to join the group
         join_acceptance = 8     # Leader confirming to new member that they have been accepted into the group
+        check_group_view_consistent = 9
+        check_group_view_consistent_ack = 10
