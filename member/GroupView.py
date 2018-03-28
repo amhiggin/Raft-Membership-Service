@@ -7,7 +7,7 @@
 '''
 import logging, sys
 sys.path.append("../")
-import MemberLib as lib
+import member.MemberLib as lib
 
 class GroupView(object):
 
