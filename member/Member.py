@@ -13,7 +13,6 @@ import socket
 import struct
 import sys
 import time
-import uuid
 
 import member.GroupView as GroupView
 import member.MemberLib as lib
@@ -453,7 +452,7 @@ class Member:
             except socket.timeout:
                 break
             else:
-                if message.get_term() > self.term and message.get_member_id() != self.id:
+                if message.get_term() > self.term and message.get_member_id() != str(self.id):
                     self.term = message.get_term()
                     self.voted = False
 
@@ -476,7 +475,7 @@ class Member:
                     new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' joined the group')
                     self.uncommitted_log_entries.append(new_log_entry)
 
-                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != self.id:
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
                     self.heartbeat_received = True
 
                     # TODO update this somehow so that we don't rely on an id that needs to be known at runtime
@@ -515,7 +514,7 @@ class Member:
                             lib.print_message('I have been removed from the group!', self.id)
                             self.state = State.State.outsider
 
-                elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != self.id:
+                elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
                     if self.voted is False:
                         self.term = message.get_term()
                         self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
@@ -544,13 +543,13 @@ def do_exit_behaviour(member):
 
 if __name__ == "__main__":
     member = None
-    starting_id = uuid.uuid4().__int__()
     try:
         if sys.argv[1] == 'True':
             group_founder = True
         else:
             group_founder = False
 
+        starting_id = sys.argv[2]
         member = Member(starting_id, group_founder)
         _thread.start_new_thread(member.start_serving, ())
 
