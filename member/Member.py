@@ -5,29 +5,30 @@
     Other recovery mechanisms, client service to be provided.
 '''
 
-import _thread, sys
-import socket
-import MemberLib as lib
-#from DistributedManagementSystem import MessageType
-import MessageType
-import GroupView as GroupView
-from State import State
-import time
-import struct
+import _thread
 import logging
-import pickle
-#from DistributedManagementSystem import Message as Message
-import Message as Message
-#from DistributedManagementSystem import MessageDataType
-import MessageDataType
 import os
+import pickle
+import socket
+import struct
+import sys
+import time
+import uuid
+
+import member.GroupView as GroupView
+import member.MemberLib as lib
+from member import State
+
+import Message as Message
+import MessageDataType
+import MessageType
 
 sys.path.append("../")
 sys.path.append(".")
 
 '''  Server constants '''
 SERVER_PORT = 45678  # Review
-DEFAULT_STATE = State.follower
+DEFAULT_STATE = State.State.follower
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 45678
 
@@ -38,14 +39,14 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self,_id, group_founder):
+    def __init__(self, _id, is_group_founder):
         self.id = _id
         self.server_socket = None
 
         # Configure logging
         self.log_filename = "MemberLogs/Member_" + str(self.id) + ".log"
-        logging.basicConfig(filename = self.log_filename, level=logging.DEBUG,format="%(asctime)s: %(message)s")
         logging.FileHandler(self.log_filename, mode='w')  # Overwrite previous version of log (if it exists)
+        logging.basicConfig(filename=self.log_filename, level=logging.DEBUG,format="%(asctime)s: %(message)s")
         self.log_index = 0
 
         self.group_view = GroupView.GroupView()
@@ -53,14 +54,14 @@ class Member:
         self.index_of_latest_uncommitted_log = 0
         self.index_of_latest_committed_log = 0
 
-        if group_founder is True:
-            self.state = State.leader
+        if is_group_founder is True:
+            self.state = State.State.leader
             self.group_view.add_member(self.id)
             logging.info('Member {0} founded group'.format(self.id))
             self.index_of_latest_uncommitted_log += 1
             self.index_of_latest_committed_log += 1
         else:
-            self.state = State.outsider
+            self.state = State.State.outsider
 
         self.multicast_listener_socket = None
         self.heartbeat_timeout_point = None
@@ -90,7 +91,7 @@ class Member:
         self.election_timeout_point = lib.get_random_timeout()
 
         while self.running is True:
-            if self.state == State.follower:
+            if self.state == State.State.follower:
                 time.sleep(SLEEP_TIMEOUT)
 
                 if self.heartbeat_received:
@@ -100,10 +101,10 @@ class Member:
                 else:
                     if time.time() > self.heartbeat_timeout_point:
                         lib.print_message('Heartbeat timeout - I am now a candidate', self.id)
-                        self.state = State.candidate
+                        self.state = State.State.candidate
                         self.ready_to_run_for_election = True
 
-            elif self.state == State.candidate:
+            elif self.state == State.State.candidate:
                 time.sleep(SLEEP_TIMEOUT)
                 if self.ready_to_run_for_election == False and time.time() > self.election_timeout_point:
                     lib.print_message('Election timeout - I am going to start a new term', self.id)
@@ -146,23 +147,24 @@ class Member:
             while self.running:
 
                 # If you are the leader, regularly send heartbeat messages via multicast
-                if self.state == State.leader and self.running is True:
+                if self.state == State.State.leader and self.running is True:
                     self.do_leader_message_listening()
 
                 # If you are a follower, listen for heartbeat messages
-                if self.state == State.follower and self.running is True:
+                if self.state == State.State.follower and self.running is True:
                     self.do_follower_message_listening()
 
                 # If you are a candidate, request votes until you are elected or detect a new leader
-                if self.state == State.candidate and self.running is True:
+                if self.state == State.State.candidate and self.running is True:
                     self.do_candidate_message_listening()
 
-                if self.state == State.outsider and self.running is True:
+                if self.state == State.State.outsider and self.running is True:
                     self.do_outsider_message_listening()
 
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
         finally:
+            do_exit_behaviour(self)
             sys.exit(1)
 
     # Listening/responding loop - outsider
@@ -177,9 +179,9 @@ class Member:
             else:
                 if message.get_message_type() == MessageType.MessageType.heartbeat:
 
-                     self.server_socket.sendto(
-                         pickle.dumps(Message.Message(self.term, MessageType.MessageType.join_request, None, self.id, '')),
-                         sender)
+                    self.server_socket.sendto(
+                        pickle.dumps(Message.Message(self.term, MessageType.MessageType.join_request, None, self.id, '')),
+                        sender)
 
         # Listen for direct confirmation from the leader that you have been accepted into the group
         try:
@@ -189,20 +191,20 @@ class Member:
             pass
         else:
             if message.get_message_type() == MessageType.MessageType.join_acceptance:
-                    lib.print_message('I have been accepted into the group', self.id)
+                lib.print_message('I have been accepted into the group', self.id)
 
-                    # Replicate the leader's log (which is included in the acceptance message)
-                    with open(self.log_filename, 'w') as log_file:
-                        log_file.write(message.get_data())
+                # Replicate the leader's log (which is included in the acceptance message)
+                with open(self.log_filename, 'w') as log_file:
+                    log_file.write(message.get_data())
 
-                    self.index_of_latest_uncommitted_log = message.get_index_of_latest_uncommited_log()
-                    self.index_of_latest_committed_log = message.get_index_of_latest_commited_log()
+                self.index_of_latest_uncommitted_log = message.get_index_of_latest_uncommited_log()
+                self.index_of_latest_committed_log = message.get_index_of_latest_commited_log()
 
-                    self.group_view = message.get_group_view()
-                    lib.print_message('My new group view is ' + str(self.group_view.get_members()), self.id)
+                self.group_view = message.get_group_view()
+                lib.print_message('My new group view is ' + str(self.group_view.get_members()), self.id)
 
-                    self.state = State.follower
-                    self.heartbeat_timeout_point = lib.get_random_timeout()
+                self.state = State.State.follower
+                self.heartbeat_timeout_point = lib.get_random_timeout()
 
 
     # Listening/responding loop - candidate
@@ -220,7 +222,7 @@ class Member:
                     lib.print_message('Candidate: My term is < than that of candidate ' + message.get_member_id() + ' - I am now a follower (and will reset my heartbeat timeout)',
                                       self.id)
                     self.heartbeat_timeout_point = lib.get_random_timeout()
-                    self.state = State.follower
+                    self.state = State.State.follower
                     self.term = message.get_term()
 
                 elif message.get_term() >= self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
@@ -228,10 +230,10 @@ class Member:
                         'Candidate: My term is <= that of leader ' + message.get_member_id() + ' - I am now a follower (and will reset my heartbeat timeout)',
                         self.id)
                     self.heartbeat_timeout_point = lib.get_random_timeout()
-                    self.state = State.follower
+                    self.state = State.State.follower
 
         # Try to get elected leader
-        if self.state == State.candidate and self.ready_to_run_for_election == True:
+        if self.state is State.State.candidate and self.ready_to_run_for_election is True:
 
             # lib.print_message('I am starting a new term!', self.id)
 
@@ -270,7 +272,7 @@ class Member:
 
                         if votes_received >= votes_needed:
                             lib.print_message('Sufficient votes received - I am now a leader', self.id)
-                            self.state = State.leader
+                            self.state = State.State.leader
                             running_for_election = False
 
                     if time.time() > self.election_timeout_point:
@@ -293,13 +295,13 @@ class Member:
                 break
             else:
                 if message.get_term() > self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
-                    lib.print_message('Leader: my term is < than that of leader ' + message.get_member_id() + ' - I am now a follower',self.id)
-                    self.state = State.follower
+                    lib.print_message('Leader: my term is < than that of leader ' + message.get_member_id() + ' - I am now a follower', self.id)
+                    self.state = State.State.follower
                     self.term = message.get_term()
                     break
 
         # Multicast heartbeat messages for followers
-        if self.state == State.leader:
+        if self.state == State.State.leader:
 
             try:
                 leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
@@ -344,9 +346,8 @@ class Member:
                         self.index_of_latest_uncommitted_log,
                         self.index_of_latest_committed_log,
                         self.group_view)),
-                        #self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
+                    #self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
                     leader_multicast_group)
-                # TODO needs to have a per-member list of the heartbeats sent. Heartbeat must also have a sequence number.
             except Exception as e2:
                 lib.print_message('Exception e2: ' + str(e2), self.id)
 
@@ -452,7 +453,7 @@ class Member:
             except socket.timeout:
                 break
             else:
-                if message.get_term() > self.term and message.get_member_id() != str(self.id):
+                if message.get_term() > self.term and message.get_member_id() != self.id:
                     self.term = message.get_term()
                     self.voted = False
 
@@ -475,9 +476,11 @@ class Member:
                     new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' joined the group')
                     self.uncommitted_log_entries.append(new_log_entry)
 
-                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
+                if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != self.id:
                     self.heartbeat_received = True
-                    if self.TEST_NUMBER_OF_ACKS_SENT == 3 and self.id == str(3):    # Member 3 only
+
+                    # TODO update this somehow so that we don't rely on an id that needs to be known at runtime
+                    if self.TEST_NUMBER_OF_ACKS_SENT == 3 and self.id== str(3):    # Member 3 only
                         lib.print_message('FAILURE TEST: I am not going to send this ack', self.id)
                     else:
                         self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
@@ -510,9 +513,9 @@ class Member:
                         # Check that you are still in the group
                         if self.group_view.contains(self.id) is False:
                             lib.print_message('I have been removed from the group!', self.id)
-                            self.state = State.outsider
+                            self.state = State.State.outsider
 
-                elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
+                elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != self.id:
                     if self.voted is False:
                         self.term = message.get_term()
                         self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
@@ -527,22 +530,26 @@ class Member:
         # else:
         #     if message.get_message_type() == MessageType.MessageType.removal:
         #         lib.print_message('I have been removed from the group', self.id)
-        #         self.state = State.outsider
+        #         self.state = State.State.outsider
 
     def respond_to_client_request(self, client_message):
         # TODO implement this
         pass
 
 
+def do_exit_behaviour(member):
+    member.group_view.erase()
+    logging.shutdown()
+
+
 if __name__ == "__main__":
     member = None
+    starting_id = uuid.uuid4().__int__()
     try:
         if sys.argv[1] == 'True':
             group_founder = True
         else:
             group_founder = False
-
-        starting_id = sys.argv[2]
 
         member = Member(starting_id, group_founder)
         _thread.start_new_thread(member.start_serving, ())
@@ -550,7 +557,6 @@ if __name__ == "__main__":
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
     except KeyboardInterrupt as main_exception:
-        member.group_view.erase()
-        logging.shutdown()
+        do_exit_behaviour(member)
         exit(0)
 
