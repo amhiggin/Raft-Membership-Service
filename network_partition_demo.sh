@@ -12,7 +12,7 @@ done
 
 for i in $( seq 6 8)
 do
-        python3 "$(pwd)"/member/Member.py False $i 5 &
+        python3 "$(pwd)"/member/Member.py False $i 15 &
 	echo "Partition node launched"
 done
 python3 "$(pwd)"/member/Member.py True 1 0
