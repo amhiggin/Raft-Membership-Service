@@ -8,6 +8,7 @@ MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses
 MULTICAST_PORT = 56789                # Port on which the group is listening for client requests
 RECV_BYTES = 1024
 
+
 def send_request(self_socket):
     '''
     The client will need to be able to know where to send the request to
@@ -23,7 +24,8 @@ def send_request(self_socket):
         message = pickle.loads(message)
         if message.get_message_type() == MessageType.MessageType.service_response:
             group_view = message.get_group_view()
-            return group_view.get_members()
+            if group_view is not None:
+                return group_view.get_members()
     except Exception as e1:
         print_message("An exception occurred while waiting for response from group: {0}".format(str(e1)))
     return None
