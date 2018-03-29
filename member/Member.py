@@ -114,9 +114,7 @@ class Member:
                     self.ready_to_run_for_election = True
 
     def network_partition_thread(self):
-        print('Node ' + self.id + ' is sleeping.\n')
         time.sleep(self.partition_timer)
-        print('Node ' + self.id + ' is awake.\n')
         #self.multicast_listener_socket.close()
         global MULTICAST_ADDRESS
         global MULTICAST_PORT
@@ -125,7 +123,6 @@ class Member:
         #print('Node multicast port closed.\n')
         MULTICAST_ADDRESS = PARTITION_MULTICAST_ADDRESS
         MULTICAST_PORT = PARTITION_MULTICAST_PORT
-        print('Node multicast port and address changed.\n')
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.multicast_listener_socket.settimeout(0.2)
         self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -133,7 +130,7 @@ class Member:
         self.multicast_listener_socket.bind(follower_address)
         # Set the time-to-live for messages to 1 so they do not go further than the local network segment
         self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
-        print('Node partitioned.\n')
+        print('Node ' + self.id + ' is now in a network partition.\n')
 
     # Startup node, configure socket
     def start_serving(self):
