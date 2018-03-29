@@ -4,13 +4,10 @@
 import datetime
 import random
 import time
-import sys
 import socket, struct
 
 GROUPVIEW_AGREEMENT_SOCKET_TIMEOUT = 1
-
 SERVER_SOCKET_TIMEOUT = 0.2
-sys.path.append("../")
 
 
 def get_timestamp():
@@ -70,7 +67,6 @@ def setup_group_view_agreement_socket(port, multicast_address):
 
 
 def setup_multicast_listener_socket(multicast_port, multicast_address):
-    
     multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     multicast_listener_socket.settimeout(0.2)
     multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -84,6 +80,10 @@ def setup_multicast_listener_socket(multicast_port, multicast_address):
     mreq = struct.pack('4sL', group, socket.INADDR_ANY)
     multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return multicast_listener_socket
+
+
+def calculate_required_majority(group_view):
+    return (group_view.get_size() / 2)
 
 
 def handle_timeout_exception(e):

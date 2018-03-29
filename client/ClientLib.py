@@ -7,12 +7,18 @@ import pickle
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 56789                # Port on which the group is listening for client requests
 RECV_BYTES = 1024
+TIMEOUT_PERIOD_SECONDS = 30
+
+
+def setup_up_socket(socket_port):
+    # Set up client socket
+    self_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    self_socket.bind(('', socket_port))
+    self_socket.settimeout(TIMEOUT_PERIOD_SECONDS)
+    return self_socket
 
 
 def send_request(self_socket):
-    '''
-    The client will need to be able to know where to send the request to
-    '''
     print_message('Sending a request for the members of the group')
     message = Message.Message(-1, MessageType.MessageType.service_request, '', None)
 

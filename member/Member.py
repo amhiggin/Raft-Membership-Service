@@ -5,12 +5,6 @@
     Other recovery mechanisms, client service to be provided.
 '''
 import sys
-
-AGREED = "agreed"
-sys.path.append("../")
-sys.path.append(".")
-
-
 import _thread
 import logging
 import os
@@ -18,6 +12,10 @@ import pickle
 import socket
 import struct
 import time
+
+AGREED = "agreed"
+sys.path.append("../")
+sys.path.append(".")
 
 import member.GroupView as GroupView
 import member.MemberLib as lib
@@ -41,8 +39,8 @@ GROUPVIEW_CONSENSUS_PORT = 54321
 RECV_BYTES = 1024
 SLEEP_TIMEOUT = 1
 
-class Member:
 
+class Member:
 
     def __init__(self, _id, is_group_founder, partition_timer = 0):
         self.id = _id
@@ -54,12 +52,11 @@ class Member:
         logging.FileHandler(self.log_filename, mode='w')  # Overwrite previous version of log (if it exists)
         logging.basicConfig(filename=self.log_filename, level=logging.DEBUG,format="%(asctime)s: %(message)s")
         self.log_index = 0
-
         self.group_view = GroupView.GroupView()
-
         self.index_of_latest_uncommitted_log = 0
         self.index_of_latest_committed_log = 0
 
+        # Set up state
         if is_group_founder is True:
             self.state = State.State.leader
             self.group_view.add_member(self.id)
@@ -94,7 +91,6 @@ class Member:
 
     # Heartbeat timer loop - if you don't receive a heartbeat message within a certain length of time, become a candidate
     def heartbeat_and_election_timer_thread(self):
-
         self.heartbeat_timeout_point = lib.get_random_timeout()
         self.election_timeout_point = lib.get_random_timeout()
 
@@ -111,7 +107,6 @@ class Member:
                         lib.print_message('Heartbeat timeout - I am now a candidate', self.id)
                         self.state = State.State.candidate
                         self.ready_to_run_for_election = True
-
             elif self.state == State.State.candidate:
                 time.sleep(SLEEP_TIMEOUT)
                 if self.ready_to_run_for_election == False and time.time() > self.election_timeout_point:
@@ -142,12 +137,10 @@ class Member:
 
     # Startup node, configure socket
     def start_serving(self):
-
         # Configure logging
         directory = os.path.dirname('MemberLogs/')
         if not os.path.exists(directory):
             os.makedirs(directory)
-
         lib.print_message('Online in state {0}'.format(self.state), self.id)
 
         try:
@@ -181,7 +174,7 @@ class Member:
             sys.exit(1)
 
     # What the leader executes if they receive an incoming client request
-    # Gets consensus from the members of the group, on the current group view
+    # Gets consensus from the members of the group, on the current group view.
     def delegation_thread(self, incoming_message, client):
         num_agreements = 0
         decoded_message = pickle.loads(incoming_message)
@@ -194,7 +187,7 @@ class Member:
                 self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
                 self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
                 (MULTICAST_ADDRESS, GROUPVIEW_CONSENSUS_PORT))
-            while num_agreements < (self.group_view.get_size() / 2):
+            while num_agreements < (lib.calculate_required_majority(self.group_view)):
                 message, responder = self.group_view_agreement_socket.recvfrom(RECV_BYTES)
                 decoded_message = pickle.loads(message)
                 if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent_ack:
@@ -207,30 +200,33 @@ class Member:
                         lib.print_message("Member {0} disagreed with {1}".format(decoded_message.get_member_id(),
                              self.group_view))
             lib.print_message("A majority of members agreed: sending groupview to client", self.id)
-            try:
-                self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                    self.term, MessageType.MessageType.service_response, None, self.id, None,
-                    self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                    client)
-                lib.print_message("Sent group view to client {0}".format(client), self.id)
-            except Exception as send_exception:
-                print(send_exception)
+            self.client_listener_socket.sendto(pickle.dumps(Message.Message(
+                self.term, MessageType.MessageType.service_response, None, self.id, None,
+                self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
+                client)
+            lib.print_message("Sent group view to client {0}".format(client), self.id)
 
 
     # Start listening for client requests
     def listen_for_client(self):
-        self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
+        try:
+            self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
 
-        while self.running and self.state is State.State.leader:
-            incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
-            try:
-                _thread.start_new_thread(self.delegation_thread(incoming_message, client), ())
-            except Exception as client_listen_exception:
-                lib.print_message("Exception occurred when listening for client: {0}".format(str(client_listen_exception)), self.id)
-                self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                    self.term, MessageType.MessageType.service_response, None, self.id, None,
-                    self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, None)),
-                    client)
+            while self.running and self.state is State.State.leader:
+                incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
+                try:
+                    _thread.start_new_thread(self.delegation_thread(incoming_message, client), (incoming_message, client))
+                except Exception as consensus_response_exception:
+                    lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
+                        str(consensus_response_exception)), self.id)
+                    self.client_listener_socket.sendto(pickle.dumps(Message.Message(
+                        self.term, MessageType.MessageType.service_response, None, self.id, None,
+                        self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, None)),
+                        client)
+        except Exception as client_listen_exception:
+            lib.print_message("An exception occurred whilst listening for client requests: {0}".format(
+                str(client_listen_exception)), self.id)
+
 
     # Follower response to consensus-checking for a client request. The follower should verify the group
     # view if it matches theirs.
@@ -676,6 +672,8 @@ if __name__ == "__main__":
             group_founder = False
 
         starting_id = sys.argv[2]
+
+        # Check whether this is a demo of network partition or not
         if len(sys.argv) > 3:
             partition_timer = int(sys.argv[3])
             member = Member(starting_id, group_founder, partition_timer)
@@ -685,6 +683,6 @@ if __name__ == "__main__":
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
-    except KeyboardInterrupt as main_exception:
+    except Exception as main_exception:
         member.do_exit_behaviour()
         exit(0)
