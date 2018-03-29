@@ -171,7 +171,11 @@ class Member:
                         decoded_message = pickle.loads(message)
                         if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent_ack:
                             if decoded_message.get_data() == "agreed":
+                                lib.print_message("Member {0} agreed with {1}".format(decoded_message.get_member_id(), self.group_view), self.id)
                                 num_agreements += 1
+                            else:
+                                lib.print_message("Member {0} disagreed with {1}".format(decoded_message.get_member_id(),
+                                                                                      self.group_view), self.id)
                     self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(
                         self.term, MessageType.MessageType.service_response, None, self.id, None,
                         self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
