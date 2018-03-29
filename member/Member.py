@@ -8,6 +8,7 @@ import sys
 sys.path.append("../")
 sys.path.append(".")
 
+
 import _thread
 import logging
 import os
@@ -29,6 +30,8 @@ SERVER_PORT = 45678  # Review
 DEFAULT_STATE = State.State.follower
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 45678
+PARTITION_MULTICAST_PORT = 45679
+PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
 CLIENT_LISTENING_PORT = 56789
 GROUPVIEW_CONSENSUS_PORT = 54321
 
@@ -38,7 +41,8 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self, _id, is_group_founder):
+
+    def __init__(self, _id, is_group_founder, partition_timer = 0):
         self.id = _id
         self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
         self.group_view_agreement_socket = lib.setup_group_view_agreement_socket(GROUPVIEW_CONSENSUS_PORT, MULTICAST_ADDRESS)
@@ -81,6 +85,8 @@ class Member:
         self.message_data_of_previous_message = None
         self.TEST_NUMBER_OF_ACKS_SENT = 0
 
+        self.partition_timer = partition_timer
+
     def do_exit_behaviour(self):
         self.group_view.erase()
         logging.shutdown()
@@ -111,6 +117,28 @@ class Member:
                     lib.print_message('Election timeout - I am going to start a new term', self.id)
                     self.ready_to_run_for_election = True
 
+    def network_partition_thread(self):
+        print('Node ' + self.id + ' is sleeping.\n')
+        time.sleep(self.partition_timer)
+        print('Node ' + self.id + ' is awake.\n')
+        #self.multicast_listener_socket.close()
+        global MULTICAST_ADDRESS
+        global MULTICAST_PORT
+        global PARTITION_MULTICAST_ADDRESS
+        global PARTITION_MULTICAST_PORT
+        #print('Node multicast port closed.\n')
+        MULTICAST_ADDRESS = PARTITION_MULTICAST_ADDRESS
+        MULTICAST_PORT = PARTITION_MULTICAST_PORT
+        print('Node multicast port and address changed.\n')
+        self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.multicast_listener_socket.settimeout(0.2)
+        self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        follower_address = ('', MULTICAST_PORT)
+        self.multicast_listener_socket.bind(follower_address)
+        # Set the time-to-live for messages to 1 so they do not go further than the local network segment
+        self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+        print('Node partitioned.\n')
+
     # Startup node, configure socket
     def start_serving(self):
 
@@ -127,6 +155,12 @@ class Member:
             _thread.start_new_thread(member.listen_for_client, ())
             _thread.start_new_thread(member.do_follower_client_listening, ())
 
+            #network partition thread
+            if self.partition_timer != 0:
+                print('Starting network partition timer')
+                _thread.start_new_thread(self.network_partition_thread, ())
+
+            
             while self.running:
 
                 # If you are the leader, regularly send heartbeat messages via multicast
@@ -631,7 +665,8 @@ if __name__ == "__main__":
             group_founder = False
 
         starting_id = sys.argv[2]
-        member = Member(starting_id, group_founder)
+        partition_timer = int(sys.argv[3])
+        member = Member(starting_id, group_founder, partition_timer)
         _thread.start_new_thread(member.start_serving, ())
 
         while 1:
