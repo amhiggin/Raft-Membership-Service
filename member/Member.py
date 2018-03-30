@@ -24,6 +24,7 @@ from member import State
 import Message as Message
 import MessageDataType
 import MessageType
+import uuid
 
 '''  Server constants '''
 SERVER_PORT = 45678  # Review
@@ -668,11 +669,12 @@ if __name__ == "__main__":
         else:
             group_founder = False
 
-        starting_id = sys.argv[2]
+        # starting_id = sys.argv[2]
+        starting_id = str(uuid.uuid4())
 
         # Check whether this is a demo of network partition or not
-        if len(sys.argv) > 3:
-            partition_timer = int(sys.argv[3])
+        if len(sys.argv) > 2:
+            partition_timer = int(sys.argv[2])
             member = Member(starting_id, group_founder, partition_timer)
         else:
             member = Member(starting_id, group_founder, 0)

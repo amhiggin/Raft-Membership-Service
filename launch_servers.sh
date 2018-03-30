@@ -9,8 +9,8 @@ echo "Launching $NUM_SERVERS nodes"
 
 for i in $( seq 2 $NUM_SERVERS )
 do
-        python3 "$(pwd)"/member/Member.py False $i &
+        python3 "$(pwd)"/member/Member.py False &
         #python3 member/Member.py False $i &
 done
-python3 "$(pwd)"/member/Member.py True 1
+python3 "$(pwd)"/member/Member.py True
 #python3 member/Member.py True 1
