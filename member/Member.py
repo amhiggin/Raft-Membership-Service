@@ -43,8 +43,9 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self, _id, is_group_founder, partition_timer = 0):
+    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0):
         self.id = _id
+        self.group_id = _group_id
         self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
         self.group_view_agreement_socket = lib.setup_group_view_agreement_socket(GROUPVIEW_CONSENSUS_PORT, MULTICAST_ADDRESS)
 
@@ -61,7 +62,7 @@ class Member:
         if is_group_founder is True:
             self.state = State.State.leader
             self.group_view.add_member(self.id)
-            logging.info('Log 1: Member {0} founded group'.format(self.id))
+            logging.info('Group {0}, Log 1: Member {1} founded group'.format(self.group_id, self.id))
             self.index_of_latest_uncommitted_log += 1
             self.index_of_latest_committed_log += 1
         else:
@@ -135,10 +136,7 @@ class Member:
 
     # Startup node, configure socket
     def start_serving(self):
-        # Configure logging
-        directory = os.path.dirname('MemberLogs/')
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+
         lib.print_message('Online in state {0}'.format(self.state), self.id)
 
         try:
@@ -182,7 +180,7 @@ class Member:
             lib.print_message("Received service request from {0}".format(client), self.id)
             self.group_view_agreement_socket.settimeout(30)
             self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(
-                self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
+                self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
                 self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
                 (MULTICAST_ADDRESS, GROUPVIEW_CONSENSUS_PORT))
             while num_agreements < (lib.calculate_required_majority(self.group_view)):
@@ -199,7 +197,7 @@ class Member:
                              self.group_view))
             lib.print_message("A majority of members agreed: sending groupview to client", self.id)
             self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                self.term, MessageType.MessageType.service_response, None, self.id, None,
+                self.group_id, self.term, MessageType.MessageType.service_response, None, self.id, None,
                 self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
                 client)
             lib.print_message("Sent group view to client {0}".format(client), self.id)
@@ -218,7 +216,7 @@ class Member:
                     lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
                         str(consensus_response_exception)), self.id)
                     self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                        self.term, MessageType.MessageType.service_response, None, self.id, None,
+                        self.group_id, self.term, MessageType.MessageType.service_response, None, self.id, None,
                         self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, None)),
                         client)
         except Exception as client_listen_exception:
@@ -235,7 +233,7 @@ class Member:
                 decoded_message = pickle.loads(message)
                 if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent:
                     if not decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
-                        self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(self.term,
+                        self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
                             MessageType.MessageType.check_group_view_consistent_ack, None, self.id, AGREED)),
                             (MULTICAST_ADDRESS, GROUPVIEW_CONSENSUS_PORT))
             except socket.timeout:
@@ -254,7 +252,7 @@ class Member:
             else:
                 if message.get_message_type() == MessageType.MessageType.heartbeat:
                     self.server_socket.sendto(
-                        pickle.dumps(Message.Message(self.term, MessageType.MessageType.join_request, None, self.id, 'agreed')),
+                        pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.join_request, None, self.id, 'agreed')),
                         sender)
         # Listen for direct confirmation from the leader that you have been accepted into the group
         try:
@@ -316,7 +314,7 @@ class Member:
 
             multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
             self.server_socket.sendto(
-                pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote_request, None, self.id, '', None, self.index_of_latest_committed_log)),
+                pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote_request, None, self.id, '', None, self.index_of_latest_committed_log)),
                 multicast_group)
 
             # Listen for votes until your election time is up, or you receive enough votes to become leader
@@ -438,11 +436,11 @@ class Member:
                     message_data = ''
                     self.message_data_of_previous_message = ''
 
-
                 lib.print_message('Sending heartbeats', self.id)
 
                 self.server_socket.sendto(
                     pickle.dumps(Message.Message(
+                        self.group_id,
                         self.term,
                         MessageType.MessageType.heartbeat,
                         message_data_type,
@@ -464,15 +462,14 @@ class Member:
                 responses_needed_to_commit_ascension_to_leadership = (self.group_view.get_size() // 2) + 1
 
             # Add self to list of responders - leader acts as if its responds to its own messages
-            response_received = set(self.id)
+            response_received = set()
+            response_received.add(self.id)
 
             # Listen for heartbeat acknowledgements from followers
             while True:
                 try:
                     message, member_address = self.server_socket.recvfrom(RECV_BYTES)
                     message = pickle.loads(message)
-                    if self.unresponsive_followers.__contains__(message.get_member_id()) is False:  # Disregard acknowledgements from followers that have been marked for removal
-                        response_received.add(message.get_member_id())
                 except socket.timeout:
                     # Only check for unresponsive followers if you don't have any marked for removal at the moment - doing otherwise might cause issues that aren't yet accounted for
                     if len(self.unresponsive_followers) == 0:
@@ -487,9 +484,9 @@ class Member:
                     elif message.get_message_type() == MessageType.MessageType.heartbeat_ack and message.get_term() == self.term:
                         if self.unresponsive_followers.__contains__(message.get_member_id()) is False:  # Disregard acknowledgements from followers that have been marked for removal
                             lib.print_message('Heartbeat ACK received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
-
+                            response_received.add(message.get_member_id())
                     elif message.get_message_type() == MessageType.MessageType.join_request:
-                        #lib.print_message('Join request received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
+                        lib.print_message('Join request received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
                         if self.outsiders_waiting_to_join.__contains__(message.get_member_id()) is False and self.group_view.contains(message.get_member_id()) is False:
                             self.outsiders_waiting_to_join.append(message.get_member_id())
                             self.outsiders_addresses.append(member_address)
@@ -499,12 +496,12 @@ class Member:
             if removing_a_follower is True:
                 if len(response_received) >= responses_needed_to_commit_removal_of_follower:
                     # Remove the follower from your group view
-                    lib.print_message('Removing follower from group', self.id)
                     follower_to_remove = self.unresponsive_followers[0]
+                    lib.print_message('Removing member {0} from group'.format(follower_to_remove), self.id)
                     self.group_view.remove_member(follower_to_remove)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
-                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} left'.format(follower_to_remove))
+                    logging.info('Group {0}, Log {1}: Member {2} left'.format(self.group_id, str(self.index_of_latest_uncommitted_log), follower_to_remove))
                     self.index_of_latest_committed_log += 1
 
                     # Remove the old follower from the list of followers to be removed
@@ -517,16 +514,16 @@ class Member:
                 if len(response_received) >= responses_needed_to_commit_addition_of_outsider:
 
                     # Add the new member to your own group view
-                    lib.print_message('Adding new member to the group', self.id)
+                    lib.print_message('Adding member {0} to the group'.format(new_member), self.id)
                     new_member = self.outsiders_waiting_to_join[0]
                     self.group_view.add_member(new_member)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
-                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} joined the group'.format(new_member))
+                    logging.info('Group {0}, Log {1}: Member {2} joined the group'.format(self.group_id, str(self.index_of_latest_uncommitted_log), new_member))
                     self.index_of_latest_committed_log += 1
 
                     # Message the new member to tell them they have joined
-                    new_member_address = self.outsiders_addresses[0]
+                    new_member_address = self.new_member_address #self.outsiders_addresses[0]
                     log_file = open(self.log_filename)
                     log_data = log_file.read()
 
@@ -551,7 +548,7 @@ class Member:
                     lib.print_message('Committing my ascension to leadership', self.id)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
-                    logging.info("Log " + str(self.index_of_latest_uncommitted_log) +  ": " + 'Member {0} was elected leader'.format(self.id))
+                    logging.info('Group {0}, Log {1}: Member {2} was elected leader'.format(self.group_id, str(self.index_of_latest_uncommitted_log), self.id))
                     self.index_of_latest_committed_log += 1
 
                 else:
@@ -613,7 +610,7 @@ class Member:
 
                 if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
                     self.heartbeat_received = True
-                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
 
                     # If the leader has committed a log entry but you have not, then commit it
                     if message.get_index_of_latest_commited_log() > self.index_of_latest_committed_log:
@@ -623,7 +620,7 @@ class Member:
                         for uncommitted_log_entry in self.uncommitted_log_entries:
                             entry_id = uncommitted_log_entry[0]
                             if entry_id <= message.get_index_of_latest_commited_log():
-                                new_entry_text = "Log " + str(entry_id) + ": " + uncommitted_log_entry[1]
+                                new_entry_text = 'Group {0}, Log {1}: {2}'.format(self.group_id, str(entry_id), uncommitted_log_entry[1])
                                 logging.info(new_entry_text)
 
                                 entries_to_remove.append(uncommitted_log_entry)
@@ -646,7 +643,7 @@ class Member:
                 elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
                     if self.voted is False and message.get_index_of_latest_commited_log() >= self.index_of_latest_committed_log:
                         self.term = message.get_term()
-                        self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
+                        self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                         self.voted = True
 
         # # Listen for direct confirmation from the leader that you have been removed from the group
@@ -664,21 +661,62 @@ class Member:
 if __name__ == "__main__":
     member = None
     try:
+        # Configure logging
+        directory = os.path.dirname('MemberLogs/')
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
         if sys.argv[1] == 'True':
             group_founder = True
         else:
             group_founder = False
 
-        # starting_id = sys.argv[2]
         starting_id = str(uuid.uuid4())
 
-        # Check whether this is a demo of network partition or not
-        if len(sys.argv) > 2:
-            partition_timer = int(sys.argv[2])
-            member = Member(starting_id, group_founder, partition_timer)
-        else:
-            member = Member(starting_id, group_founder, 0)
-        _thread.start_new_thread(member.start_serving, ())
+
+        if group_founder:   # Group founder - set up your own group
+            group_id = str(uuid.uuid4())
+
+            # Check whether this is a demo of network partition or not
+            if len(sys.argv) > 2:
+                partition_timer = int(sys.argv[2])
+                member = Member(starting_id, group_id, group_founder, partition_timer)
+            else:
+                member = Member(starting_id, group_id, group_founder, 0)
+
+            _thread.start_new_thread(member.start_serving, ())
+
+        else:   # Not a group founder - join all currently available groups
+            # Listen for heartbeat messages from leaders
+            multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+
+            member_instances = []
+
+            found_at_least_one_group = False
+
+            while not found_at_least_one_group:
+                while True:
+                    try:
+                        message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
+                        message = pickle.loads(message)
+                    except socket.timeout:
+                        break
+                    else:
+                        # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
+                        if message.get_message_type() == MessageType.MessageType.heartbeat:
+                            group_id = message.get_group_id()
+
+                            # Check whether this is a demo of network partition or not
+                            if len(sys.argv) > 2:
+                                partition_timer = int(sys.argv[2])
+                                member = Member(starting_id, group_id, group_founder, partition_timer)
+                            else:
+                                member = Member(starting_id, group_id, group_founder, 0)
+
+                            _thread.start_new_thread(member.start_serving, ())
+
+                            found_at_least_one_group = True
+
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously

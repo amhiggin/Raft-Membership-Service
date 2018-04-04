@@ -1,14 +1,16 @@
 
 class Message:
 
-    def __init__(self, term, message_type, message_subtype, member_id, data=None):
+    def __init__(self, group_id, term, message_type, message_subtype, member_id, data=None):
+        self.__group_id = group_id
         self.__term = term
         self.__message_type = message_type
         self.__message_subtype = message_subtype
         self.__member_id = member_id
         self.__data = data
 
-    def __init__(self, term, message_type, message_subtype, member_id, data=None, index_of_latest_uncommitted_log=None, index_of_latest_committed_log=None, group_view=None):
+    def __init__(self, group_id, term, message_type, message_subtype, member_id, data=None, index_of_latest_uncommitted_log=None, index_of_latest_committed_log=None, group_view=None):
+        self.__group_id = group_id
         self.__term = term
         self.__message_type = message_type
         self.__message_subtype = message_subtype
@@ -17,6 +19,9 @@ class Message:
         self.__index_of_latest_committed_log = index_of_latest_committed_log
         self.__group_view = group_view
         self.__data = data
+
+    def get_group_id(self):
+        return self.__group_id
 
     def get_term(self):
         return self.__term
