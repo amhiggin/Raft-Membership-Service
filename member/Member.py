@@ -7,13 +7,15 @@
 import sys
 import _thread
 import logging
-import os
 import pickle
 import socket
 import struct
 import time
 
-AGREED = "agreed"
+import member.Constants
+from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
+    RECV_BYTES, SLEEP_TIMEOUT, AGREED
+
 sys.path.append("../")
 sys.path.append(".")
 
@@ -26,20 +28,6 @@ import MessageDataType
 import MessageType
 import uuid
 
-'''  Server constants '''
-SERVER_PORT = 45678  # Review
-DEFAULT_STATE = State.State.follower
-MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
-MULTICAST_PORT = 45678
-PARTITION_MULTICAST_PORT = 45679
-PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
-CLIENT_LISTENING_PORT = 56789
-GROUPVIEW_CONSENSUS_PORT = 54321
-
-''' Generic constants '''
-RECV_BYTES = 1024
-SLEEP_TIMEOUT = 1
-
 
 class Member:
 
@@ -47,7 +35,8 @@ class Member:
         self.id = _id
         self.group_id = _group_id
         self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
-        self.group_view_agreement_socket = lib.setup_group_view_agreement_socket(GROUPVIEW_CONSENSUS_PORT, MULTICAST_ADDRESS)
+        self.agreement_socket = lib.setup_group_view_agreement_socket(CONSENSUS_PORT,
+                                                                      MULTICAST_ADDRESS)
 
         # Configure logging
         self.log_filename = "MemberLogs/Member_" + str(self.id) + ".log"
@@ -118,17 +107,13 @@ class Member:
     def network_partition_thread(self):
         time.sleep(self.partition_timer)
         #self.multicast_listener_socket.close()
-        global MULTICAST_ADDRESS
-        global MULTICAST_PORT
-        global PARTITION_MULTICAST_ADDRESS
-        global PARTITION_MULTICAST_PORT
         #print('Node multicast port closed.\n')
-        MULTICAST_ADDRESS = PARTITION_MULTICAST_ADDRESS
-        MULTICAST_PORT = PARTITION_MULTICAST_PORT
+        member.Constants.MULTICAST_ADDRESS = member.Constants.PARTITION_MULTICAST_ADDRESS
+        member.Constants.MULTICAST_PORT = member.Constants.PARTITION_MULTICAST_PORT
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.multicast_listener_socket.settimeout(0.2)
         self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        follower_address = ('', MULTICAST_PORT)
+        follower_address = ('', member.Constants.MULTICAST_PORT)
         self.multicast_listener_socket.bind(follower_address)
         # Set the time-to-live for messages to 1 so they do not go further than the local network segment
         self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
@@ -145,7 +130,7 @@ class Member:
             _thread.start_new_thread(member.listen_for_client, ())
             _thread.start_new_thread(member.do_follower_client_listening, ())
 
-            #network partition thread
+            # Network partition thread
             if self.partition_timer != 0:
                 print('Starting network partition timer')
                 _thread.start_new_thread(self.network_partition_thread, ())
@@ -171,36 +156,35 @@ class Member:
 
     # What the leader executes if they receive an incoming client request
     # Gets consensus from the members of the group, on the current group view.
-    def delegation_thread(self, incoming_message, client):
-        num_agreements = 0
+    def process_client_request_thread(self, incoming_message, client):
         decoded_message = pickle.loads(incoming_message)
         if (decoded_message.get_message_type() is MessageType.MessageType.service_request) and (
                 self.state is State.State.leader):
             # Get consensus on the current group view, from the nodes.
             lib.print_message("Received service request from {0}".format(client), self.id)
-            self.group_view_agreement_socket.settimeout(30)
-            self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(
+            self.agreement_socket.settimeout(30)
+            self.agreement_socket.sendto(pickle.dumps(Message.Message(
                 self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
                 self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                (MULTICAST_ADDRESS, GROUPVIEW_CONSENSUS_PORT))
-            while num_agreements < (lib.calculate_required_majority(self.group_view)):
-                message, responder = self.group_view_agreement_socket.recvfrom(RECV_BYTES)
-                decoded_message = pickle.loads(message)
-                if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent_ack:
-                    if decoded_message.get_data() == "agreed":
-                        lib.print_message(
-                            "Member {0} agreed with {1}".format(decoded_message.get_member_id(), self.group_view),
-                            self.id)
-                        num_agreements += 1
-                    else:
-                        lib.print_message("Member {0} disagreed with {1}".format(decoded_message.get_member_id(),
-                             self.group_view))
+                (MULTICAST_ADDRESS, CONSENSUS_PORT))
+
+            lib.get_groupview_consensus(self)
             lib.print_message("A majority of members agreed: sending groupview to client", self.id)
-            self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                self.group_id, self.term, MessageType.MessageType.service_response, None, self.id, None,
-                self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                client)
+            lib.send_client_groupview_response(self, client)
             lib.print_message("Sent group view to client {0}".format(client), self.id)
+
+        elif (decoded_message.get_message_type() is MessageType.MessageType.group_delete_request) and (
+                self.state is State.State.leader):
+            lib.print_message("Received group deletion request from {0}".format(client), self.id)
+            self.agreement_socket.settimeout(30)
+            self.agreement_socket.sendto(pickle.dumps(Message.Message(
+                self.group_id, self.term, MessageType.MessageType.group_delete_request, None, self.id, '',
+                self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
+                (MULTICAST_ADDRESS, CONSENSUS_PORT))
+            lib.get_deletion_responses(self)
+            lib.send_client_deletion_response(self, client)
+            lib.print_message("Sent confirmation of deletion of group {0} to client {1}".format(client, self.group_id), self.id)
+
 
 
     # Start listening for client requests
@@ -211,7 +195,7 @@ class Member:
             while self.running and self.state is State.State.leader:
                 incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
                 try:
-                    _thread.start_new_thread(self.delegation_thread(incoming_message, client), (incoming_message, client))
+                    _thread.start_new_thread(self.process_client_request_thread(incoming_message, client), (incoming_message, client))
                 except Exception as consensus_response_exception:
                     lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
                         str(consensus_response_exception)), self.id)
@@ -229,13 +213,18 @@ class Member:
     def do_follower_client_listening(self):
         while True:
             try:
-                message, sender = self.group_view_agreement_socket.recvfrom(RECV_BYTES)
+                message, sender = self.agreement_socket.recvfrom(RECV_BYTES)
                 decoded_message = pickle.loads(message)
                 if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent:
                     if not decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
-                        self.group_view_agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            MessageType.MessageType.check_group_view_consistent_ack, None, self.id, AGREED)),
-                            (MULTICAST_ADDRESS, GROUPVIEW_CONSENSUS_PORT))
+                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
+                                                                                  MessageType.MessageType.check_group_view_consistent_ack, None, self.id,
+                                                                                  AGREED)),
+                                                     (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                elif decoded_message.get_message_type() is MessageType.MessageType.group_delete_request:
+                    lib.print_message("Received message to delete from the leader", self.id)
+                    self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
+                              MessageType.MessageType.group_delete_response, None, self.id, AGREED)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
             except socket.timeout:
                 lib.print_message("timed out", self.id)
                 break
@@ -514,8 +503,8 @@ class Member:
                 if len(response_received) >= responses_needed_to_commit_addition_of_outsider:
 
                     # Add the new member to your own group view
-                    lib.print_message('Adding member {0} to the group'.format(new_member), self.id)
                     new_member = self.outsiders_waiting_to_join[0]
+                    lib.print_message('Adding member {0} to the group'.format(new_member), self.id)
                     self.group_view.add_member(new_member)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
@@ -662,9 +651,7 @@ if __name__ == "__main__":
     member = None
     try:
         # Configure logging
-        directory = os.path.dirname('MemberLogs/')
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        directory = lib.create_logs_directory_if_not_exists()
 
         if sys.argv[1] == 'True':
             group_founder = True
@@ -672,7 +659,6 @@ if __name__ == "__main__":
             group_founder = False
 
         starting_id = str(uuid.uuid4())
-
 
         if group_founder:   # Group founder - set up your own group
             group_id = str(uuid.uuid4())
@@ -689,9 +675,7 @@ if __name__ == "__main__":
         else:   # Not a group founder - join all currently available groups
             # Listen for heartbeat messages from leaders
             multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
-
             member_instances = []
-
             found_at_least_one_group = False
 
             while not found_at_least_one_group:
@@ -714,9 +698,7 @@ if __name__ == "__main__":
                                 member = Member(starting_id, group_id, group_founder, 0)
 
                             _thread.start_new_thread(member.start_serving, ())
-
                             found_at_least_one_group = True
-
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously

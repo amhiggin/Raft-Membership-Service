@@ -5,6 +5,10 @@ import datetime
 import random
 import time
 import socket, struct
+import os
+import MessageType, Message
+import member.Constants as constants
+import pickle
 
 GROUPVIEW_AGREEMENT_SOCKET_TIMEOUT = 1
 SERVER_SOCKET_TIMEOUT = 0.2
@@ -82,10 +86,73 @@ def setup_multicast_listener_socket(multicast_port, multicast_address):
     return multicast_listener_socket
 
 
+def get_groupview_consensus(member):
+    num_agreements = 0
+    while num_agreements < (calculate_required_majority(member.group_view)):
+        message, responder = member.group_view_agreement_socket.recvfrom(constants.RECV_BYTES)
+        decoded_message = pickle.loads(message)
+        if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent_ack:
+            if decoded_message.get_data() == "agreed":
+                print_message(
+                    "Member {0} agreed with {1}".format(decoded_message.get_member_id(), member.group_view),
+                    member.id)
+                num_agreements += 1
+            else:
+                print_message("Member {0} disagreed with {1}".format(decoded_message.get_member_id(),
+                                                                     member.group_view), member.id)
+    # When exiting, consensus will have been reached
+
+
+def send_client_groupview_response(member, client):
+    member.client_listener_socket.sendto(pickle.dumps(Message.Message(
+        member.group_id, member.term, MessageType.MessageType.service_response, None, member.id, None,
+        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+        client)
+
+
+def get_deletion_responses(member):
+    num_responses = 0
+    group_size = member.group_view.get_group_size() - 1
+    while num_responses < group_size:
+        message, responder = member.group_view_agreement_socket.recvfrom(constants.RECV_BYTES)
+        decoded_message = pickle.loads(message)
+        if decoded_message.get_message_type() is MessageType.MessageType.group_delete_response:
+            if decoded_message.get_data() == "agreed":
+                print_message(
+                    "Member {0} agreed to leave the group {1}".format(decoded_message.get_member_id(), member.group_view),
+                    member.id)
+                num_responses += 1
+            else:
+                print_message("Member {0} did not agree to leave the group {1}".format(decoded_message.get_member_id(),
+                                                                     member.group_view), member.id)
+    # When exiting, consensus will have been reached
+
+
+def send_client_groupview_response(member, client):
+    member.client_listener_socket.sendto(pickle.dumps(Message.Message(
+        member.group_id, member.term, MessageType.MessageType.service_response, None, member.id, None,
+        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+        client)
+
+
+def send_client_deletion_response(member, client):
+    member.client_listener_socket.sendto(pickle.dumps(Message.Message(
+        member.group_id, member.term, MessageType.MessageType.group_delete_response, None, member.id, None,
+        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+        client)
+
+
 def calculate_required_majority(group_view):
-    return (group_view.get_size() / 2)
+    return group_view.get_size() / 2
 
 
 def handle_timeout_exception(e):
     if str(e) == 'timed out':
         pass  # Continue
+
+
+def create_logs_directory_if_not_exists():
+    directory = os.path.dirname('MemberLogs/')
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    return directory
