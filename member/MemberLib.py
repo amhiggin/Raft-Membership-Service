@@ -89,3 +89,9 @@ def calculate_required_majority(group_view):
 def handle_timeout_exception(e):
     if str(e) == 'timed out':
         pass  # Continue
+
+def write_to_log(log_filename, message):
+    log_file = open(log_filename, 'a')
+    timestamp = time.strftime("%m-%d-%Y %H:%M:%S", time.gmtime())
+    log_file.write(timestamp + ' ' + message + '\n')
+    log_file.close()
