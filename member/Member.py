@@ -26,6 +26,8 @@ import MessageDataType
 import MessageType
 import uuid
 
+import zlib
+
 '''  Server constants '''
 SERVER_PORT = 45678  # Review
 DEFAULT_STATE = State.State.follower
@@ -37,7 +39,7 @@ CLIENT_LISTENING_PORT = 56789
 GROUPVIEW_CONSENSUS_PORT = 54321
 
 ''' Generic constants '''
-RECV_BYTES = 1024
+RECV_BYTES = 2048#1024
 SLEEP_TIMEOUT = 1
 
 
@@ -266,13 +268,14 @@ class Member:
 
                 # Replicate the leader's log (which is included in the acceptance message)
                 with open(self.log_filename, 'w') as log_file:
-                    log_file.write(message.get_data())
+                    compressed_data = message.get_data()
+                    decompressed_data = pickle.loads(zlib.decompress(compressed_data))
+                    log_file.write(decompressed_data) #message.get_data())
 
                 self.index_of_latest_uncommitted_log = message.get_index_of_latest_uncommited_log()
                 self.index_of_latest_committed_log = message.get_index_of_latest_commited_log()
 
                 self.group_view = message.get_group_view()
-                lib.print_message('My new group view is ' + str(self.group_view.get_members()), self.id)
 
                 self.state = State.State.follower
                 self.heartbeat_timeout_point = lib.get_random_timeout()
@@ -486,7 +489,6 @@ class Member:
                             lib.print_message('Heartbeat ACK received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
                             response_received.add(message.get_member_id())
                     elif message.get_message_type() == MessageType.MessageType.join_request:
-                        lib.print_message('Join request received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
                         if self.outsiders_waiting_to_join.__contains__(message.get_member_id()) is False and self.group_view.contains(message.get_member_id()) is False:
                             self.outsiders_waiting_to_join.append(message.get_member_id())
                             self.outsiders_addresses.append(member_address)
@@ -514,8 +516,8 @@ class Member:
                 if len(response_received) >= responses_needed_to_commit_addition_of_outsider:
 
                     # Add the new member to your own group view
-                    lib.print_message('Adding member {0} to the group'.format(new_member), self.id)
                     new_member = self.outsiders_waiting_to_join[0]
+                    lib.print_message('Adding member {0} to the group'.format(new_member), self.id)
                     self.group_view.add_member(new_member)
 
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
@@ -523,13 +525,18 @@ class Member:
                     self.index_of_latest_committed_log += 1
 
                     # Message the new member to tell them they have joined
-                    new_member_address = self.new_member_address #self.outsiders_addresses[0]
+                    new_member_address = self.outsiders_addresses[0]
                     log_file = open(self.log_filename)
                     log_data = log_file.read()
 
+                    compressed_log_data = zlib.compress(pickle.dumps(log_data, pickle.HIGHEST_PROTOCOL), 9)
+
                     # Send a join confirmation with the entire log index
                     # NB) What about uncommitted log entries???
-                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, MessageType.MessageType.join_acceptance, None, self.id, log_data,
+
+                    # Send compressed log data
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, self.group_id, MessageType.MessageType.join_acceptance, None,
+                                                                           self.id, compressed_log_data,
                                                                            self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log,
                                                                            self.group_view)), new_member_address)
 
@@ -550,6 +557,8 @@ class Member:
                     # Commit the entry to your own log (followers will see that you have committed this entry, and will do the same - they should have an uncommitted version)
                     logging.info('Group {0}, Log {1}: Member {2} was elected leader'.format(self.group_id, str(self.index_of_latest_uncommitted_log), self.id))
                     self.index_of_latest_committed_log += 1
+
+                    self.message_data_type_of_previous_message = None
 
                 else:
                     lib.print_message('I did not get enough responses to commit my ascension to leader', self.id)
@@ -633,7 +642,6 @@ class Member:
 
                         # Update your group view to match that of the leader
                         self.group_view = message.get_group_view()
-                        lib.print_message('My new group view is ' + str(self.group_view.get_members()), self.id)
 
                         # Check that you are still in the group
                         if self.group_view.contains(self.id) is False:
