@@ -10,6 +10,7 @@ import MessageType, Message
 import member.Constants as constants
 import pickle
 import zlib
+import member.State as State
 
 REMOVED = "removed"
 
@@ -145,6 +146,8 @@ def remove_members_from_group(member):
     if num_responses == (initial_group_size_including_leader - 1):
         try:
             safe_remove_members_from_group(member, respondents)
+            member.state = State.State.outsider
+            member.running = False
         except Exception as e:
             print_message("Failed to remove all group members from the group: rolling back", member.id)
             member.group_view = members_backup
@@ -172,7 +175,7 @@ def safe_remove_members_from_group(member, respondents):
         raise ValueError("There was an issue with removing members from the group for deletion")
 
 
-def send_client_deletion_response(member, client):
+def send_deletion_response_to_client(member, client):
     try:
         member.client_listener_socket.sendto(pickle.dumps(Message.Message(
             member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, constants.SUCCESS,

@@ -71,7 +71,6 @@ class Member:
         self.TEST_NUMBER_OF_ACKS_SENT = 0
         self.partition_timer = partition_timer
 
-
     def do_exit_behaviour(self):
         self.group_view.erase()
 
@@ -116,7 +115,7 @@ class Member:
     def start_serving(self):
         lib.print_message('Online in state {0}'.format(self.state), self.id)
         if self.state is State.State.leader:
-            lib.print_message("Our group is available at: {0}".format(self.group_id), self.id)
+            lib.print_message("Our group {0} is {0}".format(self.group_id), self.id)
 
         try:
             _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
@@ -168,10 +167,9 @@ class Member:
                 elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
                     lib.print_message("Received group deletion request from {0}".format(client), self.id)
                     lib.remove_members_from_group(self)
-                    lib.send_client_deletion_response(self, client)
-                    # TODO FIXME kill threads and step down to state outsider
+                    lib.send_deletion_response_to_client(self, client)
         except Exception as e:
-            lib.print_message("An exeption occurred when processing a client request: {0}".format(str(e)), self.id)
+            lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
 
 
     # Start listening for client requests
@@ -208,7 +206,6 @@ class Member:
 
                     # Group view consensus request
                     if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent:
-                        lib.print_message("Received group view consensus request from the leader", self.id)
                         response_type = MessageType.MessageType.check_group_view_consistent_ack
                         if decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
                             response = ''
@@ -216,14 +213,12 @@ class Member:
                               response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
                     # Group deletion request
                     elif decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_request:
-                        lib.print_message("Received message to delete from the leader", self.id)
                         response_type = MessageType.MessageType.member_group_delete_response
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
                             response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
                     # Group deletion confirmation/finalisation request
                     elif decoded_message.get_message_type() is MessageType.MessageType.finalise_member_removal_request:
-                        lib.print_message("Received message to finalise removal from the leader", self.id)
-                        # TODO remove notion of group from the follower
+                        # TODO @Amber remove notion of group from the follower
                         response = REMOVED
                         response_type = MessageType.MessageType.finalise_member_removal_response
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
@@ -573,7 +568,6 @@ class Member:
                     # Do not create a new log entry if this is a re-transmission from the leader (i.e. the leader already sent a message about this, but didn't get enough responses to commit it)
                     if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.removal_of_follower \
                             and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
-
                         # Create a new log entry, but don't commit it yet
                         self.index_of_latest_uncommitted_log += 1
                         new_log_entry = (self.index_of_latest_uncommitted_log, 'Member ' + message.get_data() + ' left')
@@ -606,7 +600,6 @@ class Member:
 
                         # If the leader has committed a log entry but you have not, then commit it
                         if message.get_index_of_latest_commited_log() > self.index_of_latest_committed_log:
-
                             entries_to_remove = []
 
                             for uncommitted_log_entry in self.uncommitted_log_entries:
@@ -614,7 +607,6 @@ class Member:
                                 if entry_id <= message.get_index_of_latest_commited_log():
                                     new_entry_text = 'Group {0}, Log {1}: {2}'.format(self.group_id, str(entry_id), uncommitted_log_entry[1])
                                     lib.write_to_log(self.log_filename, new_entry_text)
-
                                     entries_to_remove.append(uncommitted_log_entry)
 
                             # Remove the newly committed entries from the list of uncommitted entries
@@ -636,17 +628,6 @@ class Member:
                             self.term = message.get_term()
                             self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                             self.voted = True
-
-                            # # Listen for direct confirmation from the leader that you have been removed from the group
-                            # try:
-                            #     message, address = self.server_socket.recvfrom(RECV_BYTES)
-                            #     message = pickle.loads(message)
-                            # except socket.timeout:
-                            #     pass
-                            # else:
-                            #     if message.get_message_type() == MessageType.MessageType.removal:
-                            #         lib.print_message('I have been removed from the group', self.id)
-                            #         self.state = State.State.outsider
 
 
 if __name__ == "__main__":
