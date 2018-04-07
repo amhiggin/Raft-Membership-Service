@@ -143,6 +143,7 @@ class Member:
         lib.print_message("multicasting group information to any outsiders listening", self.id)
         multigroup_multicast_socket_server.sendto(
             pickle.dumps(GroupAddressMessage.GroupAddressMessage(
+                self.group_id,
                 leader_multicast_group)),
             # self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
             leader_multigroup_address)
