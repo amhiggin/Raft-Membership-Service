@@ -22,11 +22,10 @@ def setup_up_socket(socket_port):
 def send_service_request(self_socket, group_address):
     print_message('Sending a request for the members of group {0}'.format(group_address))
     message = Message.Message(None, -1, MessageType.MessageType.service_request, '', None, None)
-
     multicast_group = (group_address, MULTICAST_PORT)
-    self_socket.sendto(pickle.dumps(message), multicast_group)
 
     try:
+        self_socket.sendto(pickle.dumps(message), multicast_group)
         message, address = self_socket.recvfrom(RECV_BYTES)
         message = pickle.loads(message)
         if message.get_message_type() == MessageType.MessageType.service_response:
@@ -41,11 +40,10 @@ def send_service_request(self_socket, group_address):
 def send_delete_request(self_socket, group_address):
     print_message('Sending a request to delete group {0}'.format(group_address))
     message = Message.Message(None, -1, MessageType.MessageType.group_delete_request, '', None, None)
-
     multicast_group = (group_address, MULTICAST_PORT)
-    self_socket.sendto(pickle.dumps(message), multicast_group)
 
     try:
+        self_socket.sendto(pickle.dumps(message), multicast_group)
         message, address = self_socket.recvfrom(RECV_BYTES)
         message = pickle.loads(message)
         if message.get_message_type() == MessageType.MessageType.group_delete_response:

@@ -4,13 +4,11 @@
 '''
 import sys
 sys.path.append("../")
-import socket
 import client.ClientLib as lib
 from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
-DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\t".format(lib.get_timestamp()) + \
-                       "Enter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- x to terminate.\n"
+DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- x to terminate.\n".format(lib.get_timestamp())
 DISPLAY_REQUEST_FOR_GROUP_ADDRESS = "Enter the name of the group:\n"
 REQUEST_TIMED_OUT = "The request timed out. There may have been an issue. Try again!"
 USAGE_MESSAGE = "Usage: <port_num>"
@@ -33,6 +31,13 @@ def main(socket_port):
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Group response: The group view is {0}".format(group_view))
+            elif user_input == "2":
+                group_address = raw_input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
+                deletion_response = lib.send_delete_request(self_socket, group_address)
+                if deletion_response is None:
+                    lib.print_message(REQUEST_TIMED_OUT)
+                else:
+                    lib.print_message("Deletion response: {0}".format(deletion_response))
             elif user_input == 'x':
                 running = False
             else:

@@ -4,28 +4,16 @@
     UDP is used for communication. Heartbeats are used to maintain the group view of every node, and message sequencing is used to detect message loss.
     Other recovery mechanisms, client service to be provided.
 '''
-import sys
-import _thread
-import os
-import logging
-import pickle
-import socket
-import struct
-import time
-import uuid
-import zlib
-
+import sys, _thread, pickle, socket
+import struct, time, uuid, zlib
 import member.Constants
 from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
     RECV_BYTES, SLEEP_TIMEOUT, AGREED
-
 sys.path.append("../")
 sys.path.append(".")
-
 import member.GroupView as GroupView
 import member.MemberLib as lib
 from member import State
-
 import Message as Message
 import MessageDataType
 import MessageType
@@ -37,28 +25,15 @@ class Member:
         self.id = _id
         self.group_id = _group_id
         self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
-        self.agreement_socket = lib.setup_group_view_agreement_socket(CONSENSUS_PORT,
-                                                                      MULTICAST_ADDRESS)
-
-        # Configure logging
-        self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
-        self.log_index = 0
-        self.group_view = GroupView.GroupView()
-        self.index_of_latest_uncommitted_log = 0
-        self.index_of_latest_committed_log = 0
-
-        # Set up state
-        if is_group_founder is True:
-            self.state = State.State.leader
-            self.group_view.add_member(self.id)
-            lib.write_to_log(self.log_filename, 'Group {0}, Log 1: Member {1} founded group'.format(self.group_id, self.id))
-            self.index_of_latest_uncommitted_log += 1
-            self.index_of_latest_committed_log += 1
-        else:
-            self.state = State.State.outsider
-
+        self.agreement_socket = lib.setup_group_view_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
         self.multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
         self.client_listener_socket = None
+
+        # Configure logging
+        self.configure_logging()
+        # Set up state
+        self.initialise_member_state(is_group_founder)
+
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
         self.heartbeat_received = False
@@ -75,6 +50,24 @@ class Member:
         self.message_data_of_previous_message = None
         self.TEST_NUMBER_OF_ACKS_SENT = 0
         self.partition_timer = partition_timer
+
+    def initialise_member_state(self, is_group_founder):
+        if is_group_founder is True:
+            self.state = State.State.leader
+            self.group_view.add_member(self.id)
+            lib.write_to_log(self.log_filename, 'Group {0}, Log 1: Member {1} founded group'.format(self.group_id, self.id))
+            self.index_of_latest_uncommitted_log += 1
+            self.index_of_latest_committed_log += 1
+        else:
+            self.state = State.State.outsider
+
+    def configure_logging(self):
+        # Configure logging
+        self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
+        self.log_index = 0
+        self.group_view = GroupView.GroupView()
+        self.index_of_latest_uncommitted_log = 0
+        self.index_of_latest_committed_log = 0
 
     def do_exit_behaviour(self):
         self.group_view.erase()
@@ -105,8 +98,6 @@ class Member:
 
     def network_partition_thread(self):
         time.sleep(self.partition_timer)
-        #self.multicast_listener_socket.close()
-        #print('Node multicast port closed.\n')
         member.Constants.MULTICAST_ADDRESS = member.Constants.PARTITION_MULTICAST_ADDRESS
         member.Constants.MULTICAST_PORT = member.Constants.PARTITION_MULTICAST_PORT
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -120,8 +111,9 @@ class Member:
 
     # Startup node, configure socket
     def start_serving(self):
-
         lib.print_message('Online in state {0}'.format(self.state), self.id)
+        if self.state is State.State.leader:
+            lib.print_message("Our group is available at: {0}".format(self.group_id), self.id)
 
         try:
             _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
@@ -249,20 +241,16 @@ class Member:
             pass
         else:
             if message.get_message_type() == MessageType.MessageType.join_acceptance:
-                lib.print_message('I have been accepted into group {0}'.format(message.get_group_id()), self.id)
+                lib.print_message('I have been accepted into a group', self.id)
 
                 # Replicate the leader's log (which is included in the acceptance message)
                 with open(self.log_filename, 'w') as log_file:
                     lib.extract_log_from_message(self, log_file, message)
-
                 self.index_of_latest_uncommitted_log = message.get_index_of_latest_uncommited_log()
                 self.index_of_latest_committed_log = message.get_index_of_latest_commited_log()
-
                 self.group_view = message.get_group_view()
-
                 self.state = State.State.follower
                 self.heartbeat_timeout_point = lib.get_random_timeout()
-
 
     # Listening/responding loop - candidate
     def do_candidate_message_listening(self):
@@ -348,7 +336,6 @@ class Member:
 
     # Listening/responding loop - leader
     def do_leader_message_listening(self):
-
         # Listen for multicast messages from candidates and other leaders (NB: Multicast senders also receive their own messages)
         while True:
             try:

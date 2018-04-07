@@ -5,7 +5,7 @@
     Using a list ensures ordering whilst also allowing for arbitrary removal of nodes at any position.
     Checks are in place to prevent duplicates from being added.
 '''
-import logging, sys
+import sys
 sys.path.append("../")
 import member.MemberLib as lib
 
@@ -15,7 +15,7 @@ class GroupView(object):
         self.members = []
 
     # Add a member to the group view
-    def add_member(self, new_member_id): #new_member):
+    def add_member(self, new_member_id):
         if not self.contains(new_member_id):
             self.members.append(new_member_id)
             return True
