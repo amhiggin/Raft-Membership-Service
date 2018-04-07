@@ -13,3 +13,7 @@ class MessageType(Enum):
         join_acceptance = 8     # Leader confirming to new member that they have been accepted into the group
         check_group_view_consistent = 9
         check_group_view_consistent_ack = 10
+
+        # Delete request/response messages from/to client
+        group_delete_request = 11
+        group_delete_response = 12

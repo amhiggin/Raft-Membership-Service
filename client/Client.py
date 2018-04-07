@@ -10,7 +10,8 @@ from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
 DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\t".format(lib.get_timestamp()) + \
-                       "Enter:\n\t- 1 to request the current group membership.\n\t- x to terminate.\n"
+                       "Enter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- x to terminate.\n"
+DISPLAY_REQUEST_FOR_GROUP_ADDRESS = "Enter the name of the group:\n"
 REQUEST_TIMED_OUT = "The request timed out. There may have been an issue. Try again!"
 USAGE_MESSAGE = "Usage: <port_num>"
 EXIT_MESSAGE = "Exiting - Goodbye world!"
@@ -26,7 +27,8 @@ def main(socket_port):
         while running:
             user_input = raw_input(DISPLAY_USER_OPTIONS)
             if user_input == "1":
-                group_view = lib.send_request(self_socket)
+                group_address = raw_input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
+                group_view = lib.send_service_request(self_socket, group_address)
                 if group_view is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
