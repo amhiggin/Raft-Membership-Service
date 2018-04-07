@@ -11,6 +11,8 @@ import member.Constants as constants
 import pickle
 import zlib
 
+REMOVED = "removed"
+
 GROUPVIEW_AGREEMENT_SOCKET_TIMEOUT = 1
 SERVER_SOCKET_TIMEOUT = 0.2
 
@@ -57,18 +59,18 @@ def setup_server_socket(multicast_address):
     server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return server_socket
 
-def setup_group_view_agreement_socket(port, multicast_address):
-    group_view_agreement_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    group_view_agreement_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    group_view_agreement_socket.bind(('', port))
+def setup_agreement_socket(port, multicast_address):
+    agreement_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    agreement_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    agreement_socket.bind(('', port))
     # Set the time-to-live for messages to 1 so they do not go further than the local network segment
-    group_view_agreement_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+    agreement_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
 
     # Add the socket to the multicast group
     group = socket.inet_aton(multicast_address)
     mreq = struct.pack('4sL', group, socket.INADDR_ANY)
-    group_view_agreement_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-    return group_view_agreement_socket
+    agreement_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    return agreement_socket
 
 
 def setup_multicast_listener_socket(multicast_port, multicast_address):
@@ -90,10 +92,10 @@ def setup_multicast_listener_socket(multicast_port, multicast_address):
 def get_groupview_consensus(member):
     num_agreements = 0
     while num_agreements < (calculate_required_majority(member.group_view)):
-        message, responder = member.group_view_agreement_socket.recvfrom(constants.RECV_BYTES)
+        message, responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
         decoded_message = pickle.loads(message)
         if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent_ack:
-            if decoded_message.get_data() == "agreed":
+            if decoded_message.get_data() == constants.AGREED:
                 print_message(
                     "Member {0} agreed with {1}".format(decoded_message.get_member_id(), member.group_view),
                     member.id)
@@ -105,35 +107,80 @@ def get_groupview_consensus(member):
 
 
 def send_client_groupview_response(member, client):
+    print_message("A majority of members agreed: sending groupview to client", member.id)
     member.client_listener_socket.sendto(pickle.dumps(Message.Message(
         member.group_id, member.term, MessageType.MessageType.service_response, None, member.id, None,
         member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
         client)
+    print_message("Sent group view to client {0}".format(client), member.id)
 
 
-def get_deletion_responses(member):
+# Processes the responses to deletion requests to members of the group as part of the deletion of the group/
+def remove_members_from_group(member):
+    members_backup = member.group_view
     num_responses = 0
-    group_size = member.group_view.get_group_size() - 1
-    while num_responses < group_size:
-        message, responder = member.group_view_agreement_socket.recvfrom(constants.RECV_BYTES)
+    members_to_remove = []
+    respondents = []
+    initial_group_size_including_leader = member.group_view.get_size()
+
+    member.agreement_socket.settimeout(30)
+    member.agreement_socket.sendto(pickle.dumps(Message.Message(
+        member.group_id, member.term, MessageType.MessageType.member_group_delete_request, None, member.id, '',
+        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+        (constants.MULTICAST_ADDRESS, constants.CONSENSUS_PORT))
+
+    while num_responses < (initial_group_size_including_leader - 1):
+        message, responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
         decoded_message = pickle.loads(message)
-        if decoded_message.get_message_type() is MessageType.MessageType.group_delete_response:
-            if decoded_message.get_data() == "agreed":
-                print_message(
-                    "Member {0} agreed to leave the group {1}".format(decoded_message.get_member_id(), member.group_view),
-                    member.id)
+        if (decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_response) and (decoded_message.get_member_id() is not member.id):
+            if decoded_message.get_data() == constants.AGREED:
+                print_message("Member {0} agreed to leave the group {1}".format(decoded_message.get_member_id(),
+                    member.group_view), member.id)
+                members_to_remove.append(decoded_message.get_member_id())
+                respondents.append(decoded_message.get_member_id())
                 num_responses += 1
             else:
                 print_message("Member {0} did not agree to leave the group {1}".format(decoded_message.get_member_id(),
-                                                                     member.group_view), member.id)
-    # When exiting, consensus will have been reached
+                    member.group_id), member.id)
+    if num_responses == (initial_group_size_including_leader - 1):
+        try:
+            safe_remove_members_from_group(member, respondents)
+        except Exception as e:
+            print_message("Failed to remove all group members from the group: rolling back", member.id)
+            member.group_view = members_backup
+
+
+# Safely remove members of the group, getting acknowledgements and storing backups for rollbacks in case of failure.
+def safe_remove_members_from_group(member, respondents):
+    while member.group_view.get_size() > 1:
+        print_message("Checking for finalisation of removal from group", member.id)
+        member.agreement_socket.sendto(pickle.dumps(Message.Message(
+           member.group_id, member.term, MessageType.MessageType.finalise_member_removal_request, None, member.id, '',
+           member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+           (constants.MULTICAST_ADDRESS, constants.CONSENSUS_PORT))
+        response, deletion_responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
+        decoded_response = pickle.loads(response)
+        if decoded_response.get_data() == constants.REMOVED and respondents.__contains__(decoded_response.get_member_id()) and \
+                (decoded_response.get_message_type() is MessageType.MessageType.finalise_member_removal_response):
+           member.group_view.remove_member(decoded_response.get_member_id())
+
+    # Now remove the leader too
+    member.group_view.remove_member(member.id)
+    if member.group_view.get_size() == 0:
+        print_message("All members have successfully been removed from the group view", member.id)
+    else:
+        raise ValueError("There was an issue with removing members from the group for deletion")
 
 
 def send_client_deletion_response(member, client):
-    member.client_listener_socket.sendto(pickle.dumps(Message.Message(
-        member.group_id, member.term, MessageType.MessageType.group_delete_response, None, member.id, None,
-        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
-        client)
+    try:
+        member.client_listener_socket.sendto(pickle.dumps(Message.Message(
+            member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, None,
+            member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
+            client)
+        print_message("Sent deletion response to client {0}".format(client), member.id)
+    except Exception as e:
+        print_message("Exception occurred whilst sending deletion confirmation to client: {0}".format(str(e)), member.id)
 
 
 def calculate_required_majority(group_view):
@@ -141,8 +188,9 @@ def calculate_required_majority(group_view):
 
 
 def handle_timeout_exception(e):
-    if str(e) == 'timed out':
-        pass  # Continue
+    if str(e) == constants.TIMED_OUT:
+        pass
+
 
 def write_to_log(log_filename, message):
     log_file = open(log_filename, 'a')
@@ -150,13 +198,15 @@ def write_to_log(log_filename, message):
     log_file.write(timestamp + ' ' + message + '\n')
     log_file.close()
 
+
 def create_logs_directory_if_not_exists():
     directory = os.path.dirname('MemberLogs/')
     if not os.path.exists(directory):
         os.makedirs(directory)
     return directory
 
-def extract_log_from_message(member, log_file, message):
+
+def extract_log_from_message(log_file, message):
     compressed_data = message.get_data()
     decompressed_data = pickle.loads(zlib.decompress(compressed_data))
-    log_file.write(decompressed_data)  # message.get_data())
+    log_file.write(decompressed_data)

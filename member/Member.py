@@ -4,11 +4,19 @@
     UDP is used for communication. Heartbeats are used to maintain the group view of every node, and message sequencing is used to detect message loss.
     Other recovery mechanisms, client service to be provided.
 '''
-import sys, _thread, pickle, socket
-import struct, time, uuid, zlib
+import _thread
+import pickle
+import socket
+import struct
+import sys
+import time
+import uuid
+import zlib
+
 import member.Constants
 from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
-    RECV_BYTES, SLEEP_TIMEOUT, AGREED
+    RECV_BYTES, SLEEP_TIMEOUT, AGREED, REMOVED
+
 sys.path.append("../")
 sys.path.append(".")
 import member.GroupView as GroupView
@@ -25,14 +33,26 @@ class Member:
         self.id = _id
         self.group_id = _group_id
         self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
-        self.agreement_socket = lib.setup_group_view_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
+        self.agreement_socket = lib.setup_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
         self.multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
         self.client_listener_socket = None
 
         # Configure logging
-        self.configure_logging()
+        self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
+        self.log_index = 0
+        self.group_view = GroupView.GroupView()
+        self.index_of_latest_uncommitted_log = 0
+        self.index_of_latest_committed_log = 0
+
         # Set up state
-        self.initialise_member_state(is_group_founder)
+        if is_group_founder is True:
+            self.state = State.State.leader
+            self.group_view.add_member(self.id)
+            lib.write_to_log(self.log_filename, 'Group {0}, Log 1: Member {1} founded group'.format(self.group_id, self.id))
+            self.index_of_latest_uncommitted_log += 1
+            self.index_of_latest_committed_log += 1
+        else:
+            self.state = State.State.outsider
 
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
@@ -51,23 +71,6 @@ class Member:
         self.TEST_NUMBER_OF_ACKS_SENT = 0
         self.partition_timer = partition_timer
 
-    def initialise_member_state(self, is_group_founder):
-        if is_group_founder is True:
-            self.state = State.State.leader
-            self.group_view.add_member(self.id)
-            lib.write_to_log(self.log_filename, 'Group {0}, Log 1: Member {1} founded group'.format(self.group_id, self.id))
-            self.index_of_latest_uncommitted_log += 1
-            self.index_of_latest_committed_log += 1
-        else:
-            self.state = State.State.outsider
-
-    def configure_logging(self):
-        # Configure logging
-        self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
-        self.log_index = 0
-        self.group_view = GroupView.GroupView()
-        self.index_of_latest_uncommitted_log = 0
-        self.index_of_latest_committed_log = 0
 
     def do_exit_behaviour(self):
         self.group_view.erase()
@@ -149,75 +152,85 @@ class Member:
     # Gets consensus from the members of the group, on the current group view.
     def process_client_request_thread(self, incoming_message, client):
         decoded_message = pickle.loads(incoming_message)
-        if (decoded_message.get_message_type() is MessageType.MessageType.service_request) and (
-                    self.state is State.State.leader):
-            # Get consensus on the current group view, from the nodes.
-            lib.print_message("Received service request from {0}".format(client), self.id)
-            self.agreement_socket.settimeout(30)
-            self.agreement_socket.sendto(pickle.dumps(Message.Message(
-                self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
-                self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                (MULTICAST_ADDRESS, CONSENSUS_PORT))
+        try:
+            if self.state is State.State.leader:
+                if decoded_message.get_message_type() is MessageType.MessageType.service_request:
+                    lib.print_message("Received service request from {0}".format(client), self.id)
+                    self.agreement_socket.settimeout(30)
+                    self.agreement_socket.sendto(pickle.dumps(Message.Message(
+                        self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
+                        self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
+                        (MULTICAST_ADDRESS, CONSENSUS_PORT))
 
-            lib.get_groupview_consensus(self)
-            lib.print_message("A majority of members agreed: sending groupview to client", self.id)
-            lib.send_client_groupview_response(self, client)
-            lib.print_message("Sent group view to client {0}".format(client), self.id)
+                    lib.get_groupview_consensus(self)
+                    lib.send_client_groupview_response(self, client)
 
-        elif (decoded_message.get_message_type() is MessageType.MessageType.group_delete_request) and (
-                    self.state is State.State.leader):
-            lib.print_message("Received group deletion request from {0}".format(client), self.id)
-            self.agreement_socket.settimeout(30)
-            self.agreement_socket.sendto(pickle.dumps(Message.Message(
-                self.group_id, self.term, MessageType.MessageType.group_delete_request, None, self.id, '',
-                self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                (MULTICAST_ADDRESS, CONSENSUS_PORT))
-            lib.get_deletion_responses(self)
-            lib.send_client_deletion_response(self, client)
-            lib.print_message("Sent confirmation of deletion of group {0} to client {1}".format(client, self.group_id), self.id)
-
+                elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
+                    lib.print_message("Received group deletion request from {0}".format(client), self.id)
+                    lib.remove_members_from_group(self)
+                    lib.send_client_deletion_response(self, client)
+                    # TODO FIXME kill threads and step down to state outsider
+        except Exception as e:
+            lib.print_message("An exeption occurred when processing a client request: {0}".format(str(e)), self.id)
 
 
     # Start listening for client requests
     def listen_for_client(self):
-        try:
-            self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
+        while True:
+            try:
+                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
 
-            while self.running and self.state is State.State.leader:
-                incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
-                try:
-                    _thread.start_new_thread(self.process_client_request_thread(incoming_message, client), (incoming_message, client))
-                except Exception as consensus_response_exception:
-                    lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
-                        str(consensus_response_exception)), self.id)
-                    self.client_listener_socket.sendto(pickle.dumps(Message.Message(
-                        self.group_id, self.term, MessageType.MessageType.service_response, None, self.id, None,
-                        self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, None)),
-                        client)
-        except Exception as client_listen_exception:
-            lib.print_message("An exception occurred whilst listening for client requests: {0}".format(
-                str(client_listen_exception)), self.id)
-
+                while self.running and self.state is State.State.leader:
+                    incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
+                    try:
+                        _thread.start_new_thread(self.process_client_request_thread(incoming_message, client), (incoming_message, client))
+                    except Exception as consensus_response_exception:
+                        lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
+                            str(consensus_response_exception)), self.id)
+                        self.client_listener_socket.sendto(pickle.dumps(Message.Message(
+                            self.group_id, self.term, MessageType.MessageType.service_response, None, self.id, None,
+                            self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, None)),
+                            client)
+            except Exception as client_listen_exception:
+                lib.print_message("An exception occurred whilst listening for client requests: {0}".format(
+                    str(client_listen_exception)), self.id)
 
     # Follower response to consensus-checking for a client request. The follower should verify the group
     # view if it matches theirs.
     def do_follower_client_listening(self):
+        response = AGREED
+
         while True:
-            try:
-                message, sender = self.agreement_socket.recvfrom(RECV_BYTES)
-                decoded_message = pickle.loads(message)
-                if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent:
-                    if not decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
+            if self.state is State.State.follower:
+                try:
+                    message, sender = self.agreement_socket.recvfrom(RECV_BYTES)
+                    decoded_message = pickle.loads(message)
+
+                    # Group view consensus request
+                    if decoded_message.get_message_type() is MessageType.MessageType.check_group_view_consistent:
+                        lib.print_message("Received group view consensus request from the leader", self.id)
+                        response_type = MessageType.MessageType.check_group_view_consistent_ack
+                        if decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
+                            response = ''
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                                                                                  MessageType.MessageType.check_group_view_consistent_ack, None, self.id,
-                                                                                  AGREED)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
-                elif decoded_message.get_message_type() is MessageType.MessageType.group_delete_request:
-                    lib.print_message("Received message to delete from the leader", self.id)
-                    self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                                                                              MessageType.MessageType.group_delete_response, None, self.id, AGREED)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
-            except socket.timeout:
-                lib.print_message("timed out", self.id)
-                break
+                              response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                    # Group deletion request
+                    elif decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_request:
+                        lib.print_message("Received message to delete from the leader", self.id)
+                        response_type = MessageType.MessageType.member_group_delete_response
+                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
+                            response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                    # Group deletion confirmation/finalisation request
+                    elif decoded_message.get_message_type() is MessageType.MessageType.finalise_member_removal_request:
+                        lib.print_message("Received message to finalise removal from the leader", self.id)
+                        # TODO remove notion of group from the follower
+                        response = REMOVED
+                        response_type = MessageType.MessageType.finalise_member_removal_response
+                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
+                            response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                except socket.timeout:
+                    lib.print_message("timed out", self.id)
+                    break
 
     # Listening/responding loop - outsider
     def do_outsider_message_listening(self):
@@ -245,7 +258,7 @@ class Member:
 
                 # Replicate the leader's log (which is included in the acceptance message)
                 with open(self.log_filename, 'w') as log_file:
-                    lib.extract_log_from_message(self, log_file, message)
+                    lib.extract_log_from_message(log_file, message)
                 self.index_of_latest_uncommitted_log = message.get_index_of_latest_uncommited_log()
                 self.index_of_latest_committed_log = message.get_index_of_latest_commited_log()
                 self.group_view = message.get_group_view()
@@ -279,9 +292,6 @@ class Member:
 
         # Try to get elected leader
         if self.state == State.State.candidate and self.ready_to_run_for_election == True:
-
-            # lib.print_message('I am starting a new term!', self.id)
-
             # Request votes through broadcast message
             self.term += 1
             votes_needed = (self.group_view.get_size() // 2) + 1

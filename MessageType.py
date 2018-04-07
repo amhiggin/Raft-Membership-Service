@@ -1,6 +1,5 @@
 from enum import Enum
 
-
 class MessageType(Enum):
 
         heartbeat = 1           # Monitor heartbeat
@@ -15,5 +14,9 @@ class MessageType(Enum):
         check_group_view_consistent_ack = 10
 
         # Delete request/response messages from/to client
-        group_delete_request = 11
-        group_delete_response = 12
+        client_group_delete_request = 11
+        client_group_delete_response = 12
+        member_group_delete_request = 13
+        member_group_delete_response = 14
+        finalise_member_removal_request = 15
+        finalise_member_removal_response = 16
