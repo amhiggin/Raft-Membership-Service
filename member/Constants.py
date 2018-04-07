@@ -16,3 +16,4 @@ SLEEP_TIMEOUT = 1
 AGREED = "agreed"
 REMOVED = "removed"
 TIMED_OUT = 'timed out'
+SUCCESS = "success"

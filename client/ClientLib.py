@@ -51,7 +51,7 @@ def send_delete_request(self_socket, group_address):
         message, address = self_socket.recvfrom(RECV_BYTES)
         decoded_message = pickle.loads(message)
         if decoded_message.get_message_type() == MessageType.MessageType.client_group_delete_response and \
-                        decoded_message.get_data() is SUCCESS:
+                        decoded_message.get_data() == SUCCESS:
             return SUCCESS
         else:
             return None

@@ -175,7 +175,7 @@ def safe_remove_members_from_group(member, respondents):
 def send_client_deletion_response(member, client):
     try:
         member.client_listener_socket.sendto(pickle.dumps(Message.Message(
-            member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, None,
+            member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, constants.SUCCESS,
             member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
             client)
         print_message("Sent deletion response to client {0}".format(client), member.id)
