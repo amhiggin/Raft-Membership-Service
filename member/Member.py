@@ -21,6 +21,7 @@ import member.MemberLib as lib
 from member import State
 
 import Message as Message
+import GroupAddressMessage
 import MessageDataType
 import MessageType
 import uuid
@@ -34,6 +35,8 @@ MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses
 MULTICAST_PORT = 45678
 PARTITION_MULTICAST_PORT = 45679
 PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
+MULTIGROUP_MULTICAST_ADDRESS = '224.3.29.73'
+MULTIGROUP_MULTICAST_PORT = 45680
 CLIENT_LISTENING_PORT = 56789
 GROUPVIEW_CONSENSUS_PORT = 54321
 
@@ -44,11 +47,11 @@ SLEEP_TIMEOUT = 1
 
 class Member:
 
-    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0):
+    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0, multicast_port=MULTICAST_PORT, multicast_address=MULTICAST_ADDRESS):
         self.id = _id
         self.group_id = _group_id
-        self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
-        self.group_view_agreement_socket = lib.setup_group_view_agreement_socket(GROUPVIEW_CONSENSUS_PORT, MULTICAST_ADDRESS)
+        self.server_socket = lib.setup_server_socket(multicast_address)
+        self.group_view_agreement_socket = lib.setup_group_view_agreement_socket(GROUPVIEW_CONSENSUS_PORT, multicast_address)
 
         # Configure logging
         self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
@@ -67,7 +70,7 @@ class Member:
         else:
             self.state = State.State.outsider
 
-        self.multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+        self.multicast_listener_socket = lib.setup_multicast_listener_socket(multicast_port, multicast_address)
         self.client_listener_socket = None
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
@@ -132,6 +135,43 @@ class Member:
         self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
         print('Node ' + self.id + ' is now in a network partition.\n')
 
+    def multigroup_network_leader_multicast(self):
+        multigroup_multicast_socket_server = lib.setup_server_socket(MULTICAST_ADDRESS)
+        leader_multigroup_address = (MULTIGROUP_MULTICAST_ADDRESS, MULTIGROUP_MULTICAST_PORT)
+        leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+
+        lib.print_message("multicasting group information to any outsiders listening", self.id)
+        multigroup_multicast_socket_server.sendto(
+            pickle.dumps(GroupAddressMessage.GroupAddressMessage(
+                leader_multicast_group)),
+            # self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
+            leader_multigroup_address)
+        try:
+            time.sleep(SLEEP_TIMEOUT)
+        except Exception as e100:
+             lib.print_message('e100: ' + str(e100), self.id)
+
+    def multigroup_network_outsider_listener(self):
+        multigroup_multicast_socket_listener = lib.setup_multicast_listener_socket(MULTIGROUP_MULTICAST_PORT, MULTIGROUP_MULTICAST_ADDRESS)
+        leader_responses = []
+        lib.print_message("listening for other leader messages", self.id)
+        while True:
+            try:
+                message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
+                leader_responses.append(message.get_group_address())
+            except socket.timeout:
+                lib.print_message("finished listening for other leader messages", self.id)
+                break
+
+        if not leader_responses:
+            lib.print_message("no other leaders found", self.id)
+        for leader_response in leader_responses:
+            multicast_address, multicast_port = leader_response
+            member = Member(starting_id, group_founder, 0, multicast_address=multicast_address, multicast_port=multicast_port)
+            lib.print_message('creating new outsider for ' + multicast_address + multicast_port, self.id)
+            _thread.start_new_thread(member.start_serving, ())
+
     # Startup node, configure socket
     def start_serving(self):
 
@@ -152,6 +192,7 @@ class Member:
                 # If you are the leader, regularly send heartbeat messages via multicast
                 if self.state == State.State.leader and self.running is True:
                     self.do_leader_message_listening()
+                    self.multigroup_network_leader_multicast()
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
                     self.do_follower_message_listening()
@@ -160,6 +201,7 @@ class Member:
                     self.do_candidate_message_listening()
                 if self.state == State.State.outsider and self.running is True:
                     self.do_outsider_message_listening()
+                    self.multigroup_network_outsider_listener()
 
         except Exception as e1:
             lib.print_message('Exception e1: ' + str(e1), self.id)
