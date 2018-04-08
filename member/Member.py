@@ -13,12 +13,13 @@ import time
 import uuid
 import zlib
 
+sys.path.append("../")
+sys.path.append(".")
+
 import member.Constants
 from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
     RECV_BYTES, SLEEP_TIMEOUT, AGREED, REMOVED
 
-sys.path.append("../")
-sys.path.append(".")
 import member.GroupView as GroupView
 import member.MemberLib as lib
 from member import State
@@ -691,10 +692,11 @@ class Member:
             try:
                 message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
-            except socket.timeout:
                 if groups and time.time() > search_timeout_point:
-                    lib.print_message("finished listening for all leader messages", starting_id)
+                    lib.print_message("finished listening for all groups", starting_id)
                     break
+            except socket.timeout:
+                pass
             else:
                 multicast_address, multicast_port = message.get_group_address()
                 group_id = message.get_group_id()

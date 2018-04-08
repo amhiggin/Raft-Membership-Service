@@ -1,6 +1,6 @@
 import datetime
 import pickle
-import socket
+import socket, struct
 import time
 
 import Message as Message
@@ -13,6 +13,10 @@ TIMEOUT_PERIOD_SECONDS = 30
 GROUP_PORT = 56789
 GROUP_ADDRESS = '224.3.29.71'
 SUCCESS = "success"
+MULTIGROUP_MULTICAST_ADDRESS = '224.3.29.73'
+MULTIGROUP_MULTICAST_PORT = 45680
+
+TIMEOUT_LISTEN_FOR_GROUPS = 3
 
 
 def setup_up_socket(socket_port):
@@ -21,6 +25,22 @@ def setup_up_socket(socket_port):
     self_socket.bind(('', socket_port))
     self_socket.settimeout(TIMEOUT_PERIOD_SECONDS)
     return self_socket
+
+
+def get_group_listener_socket():
+    multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    multicast_listener_socket.settimeout(0.2)
+    multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    follower_address = ('', MULTIGROUP_MULTICAST_PORT)
+    multicast_listener_socket.bind(follower_address)
+    # Set the time-to-live for messages to 1 so they do not go further than the local network segment
+    multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
+
+    # Add the socket to the multicast group
+    group = socket.inet_aton(MULTIGROUP_MULTICAST_ADDRESS)
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    return multicast_listener_socket
 
 
 def send_service_request(self_socket, group_address):
@@ -58,6 +78,34 @@ def send_delete_request(self_socket, group_address):
     except Exception as e1:
         print_message("An exception occurred while waiting for response from group: {0}".format(str(e1)))
     return None
+
+
+def listen_for_groups(group_listener_socket):
+    groups = set()
+    # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
+    search_timeout_point = get_timeout()
+    print_message("listening for all groups")
+    while True:
+        try:
+            message, sender = group_listener_socket.recvfrom(RECV_BYTES)
+            message = pickle.loads(message)
+            if groups and time.time() > search_timeout_point:
+                print_message("finished listening for all groups")
+                break
+        except socket.timeout:
+            pass
+        else:
+            multicast_address, multicast_port = message.get_group_address()
+            group_id = message.get_group_id()
+            if group_id in groups:
+                continue
+            else:
+                print_message("new group found!")
+                groups.add(group_id)
+    return groups
+
+def get_timeout():
+    return time.time() + TIMEOUT_LISTEN_FOR_GROUPS
 
 
 def get_timestamp():
