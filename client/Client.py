@@ -8,7 +8,7 @@ sys.path.append(".")
 sys.path.append("../")
 
 import client.ClientLib as lib
-from pip._vendor.distlib.compat import raw_input
+# from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
 DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- 3 to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
@@ -27,16 +27,16 @@ def main(socket_port):
 
     try:
         while running:
-            user_input = raw_input(DISPLAY_USER_OPTIONS)
+            user_input = input(DISPLAY_USER_OPTIONS)
             if user_input == "1":
-                group_address = raw_input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
+                group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 group_view = lib.send_service_request(self_socket, group_address)
                 if group_view is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Group response: The group view is {0}".format(group_view))
             elif user_input == "2":
-                group_address = raw_input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
+                group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 deletion_response = lib.send_delete_request(self_socket, group_address)
                 if deletion_response is None:
                     lib.print_message(REQUEST_TIMED_OUT)
