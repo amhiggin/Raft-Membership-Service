@@ -54,6 +54,8 @@ class Member:
         self.id = _id
         self.group_id = _group_id
         self.agreement_socket = lib.setup_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
+        self.multicast_address = multicast_address
+        self.multicast_port = multicast_port
         self.multicast_listener_socket = lib.setup_multicast_listener_socket(multicast_port, multicast_address)
         self.client_listener_socket = None
         self.server_socket = lib.setup_server_socket(multicast_address)
@@ -215,7 +217,7 @@ class Member:
     def listen_for_client(self):
         while True:
             try:
-                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
+                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, self.multicast_address)
 
                 while self.running and self.state is State.State.leader:
                     incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)

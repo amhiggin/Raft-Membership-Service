@@ -46,10 +46,10 @@ def get_group_listener_socket():
 
 
 def send_service_request(self_socket, group_id):
+    group_info = GROUPS_INFO[group_id]
     print_message('Sending a request for the members of group {0}'.format(group_id))
     message = Message.Message(None, -1, MessageType.MessageType.service_request, '', None, None)
-    self_socket.bind(('', GROUPS_INFO[group_id]["port"]))
-    multicast_group = (GROUPS_INFO[group_id]["address"], GROUPS_INFO[group_id]["port"])
+    multicast_group = (group_info["address"], GROUP_PORT)
 
     try:
         self_socket.sendto(pickle.dumps(message), multicast_group)
@@ -85,7 +85,7 @@ def send_delete_request(self_socket, group_address):
 
 def listen_for_groups(group_listener_socket):
     groups = set()
-    GROUPS_INFO = dict()
+    GROUPS_INFO.clear()
     # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
     search_timeout_point = get_timeout()
     print_message("listening for all groups")
@@ -106,7 +106,7 @@ def listen_for_groups(group_listener_socket):
             else:
                 print_message("new group found!")
                 groups.add(group_id)
-                GROUPS_INFO[group_id] = {
+                GROUPS_INFO[str(group_id)] = {
                     "address":multicast_address,
                     "port":multicast_port
                 }
