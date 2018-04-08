@@ -3,7 +3,10 @@
     To be decided: communication protocol, etc.
 '''
 import sys
+
+sys.path.append(".")
 sys.path.append("../")
+
 import client.ClientLib as lib
 from pip._vendor.distlib.compat import raw_input
 
