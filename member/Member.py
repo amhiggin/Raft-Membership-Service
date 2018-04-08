@@ -136,7 +136,7 @@ class Member:
         leader_multigroup_address = (MULTIGROUP_MULTICAST_ADDRESS, MULTIGROUP_MULTICAST_PORT)
         leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
 
-        lib.print_message("multicasting group information to any outsiders listening", self.id)
+        lib.print_message("Multicasting group information to any outsiders listening!", self.id)
         multigroup_multicast_socket_server.sendto(
             pickle.dumps(GroupAddressMessage.GroupAddressMessage(
                 self.group_id,
@@ -193,29 +193,25 @@ class Member:
             if self.state is State.State.leader:
                 if decoded_message.get_message_type() is MessageType.MessageType.service_request:
                     lib.print_message("Received service request from {0}".format(client), self.id)
-                    self.agreement_socket.settimeout(30)
+                    # self.agreement_socket.settimeout(30) # TODO @Amber add back in
                     self.agreement_socket.sendto(pickle.dumps(Message.Message(
                         self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
                         self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
                         (MULTICAST_ADDRESS, CONSENSUS_PORT))
-
                     lib.get_groupview_consensus(self)
                     lib.send_client_groupview_response(self, client)
-
                 elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
                     lib.print_message("Received group deletion request from {0}".format(client), self.id)
-                    lib.remove_members_from_group(self)
-                    lib.send_deletion_response_to_client(self, client)
+                    result = lib.safely_remove_members_from_group(self)
+                    lib.send_deletion_response_to_client(self, client, result)
         except Exception as e:
             lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
 
-
-    # Start listening for client requests
+    # Start listening for client requests: only process them if you're the leader.
     def listen_for_client(self):
-        while True:
+        while True and self.running is True:
             try:
                 self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
-
                 while self.running and self.state is State.State.leader:
                     incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
                     try:
@@ -256,11 +252,18 @@ class Member:
                             response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
                     # Group deletion confirmation/finalisation request
                     elif decoded_message.get_message_type() is MessageType.MessageType.finalise_member_removal_request:
-                        # TODO @Amber remove notion of group from the follower
-                        response = REMOVED
-                        response_type = MessageType.MessageType.finalise_member_removal_response
-                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                        if decoded_message.get_member_id() != str(self.id):
+                            # Update your group view to match that of the leader
+                            self.group_view = decoded_message.get_group_view()
+
+                            # Check that you are still in the group
+                            if self.group_view.contains(self.id) is False:
+                                lib.print_message('I have removed myself from the group!', self.id)
+                                self.state = State.State.outsider
+                            response = REMOVED
+                            response_type = MessageType.MessageType.finalise_member_removal_response
+                            self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
+                                response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
                 except socket.timeout:
                     lib.print_message("timed out", self.id)
                     break
@@ -268,7 +271,7 @@ class Member:
     # Listening/responding loop - outsider
     def do_outsider_message_listening(self):
         # Listen for heartbeat messages from leaders
-        while True:
+        while True and self.state == State.State.outsider:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -287,7 +290,7 @@ class Member:
             pass
         else:
             if message.get_message_type() == MessageType.MessageType.join_acceptance:
-                lib.print_message('I have been accepted into a group', self.id)
+                lib.print_message('I have been accepted into a group at {0} '.format(address), self.id)
 
                 # Replicate the leader's log (which is included in the acceptance message)
                 with open(self.log_filename, 'w') as log_file:
@@ -302,7 +305,7 @@ class Member:
     def do_candidate_message_listening(self):
 
         # Listen for multicast messages from other candidates and leaders (NB: Multicast senders also receive their own messages)
-        while True:  # Listen until you timeout (i.e. there are no more messages)
+        while True and self.state == State.State.candidate:  # Listen until you timeout (i.e. there are no more messages)
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -380,7 +383,7 @@ class Member:
     # Listening/responding loop - leader
     def do_leader_message_listening(self):
         # Listen for multicast messages from candidates and other leaders (NB: Multicast senders also receive their own messages)
-        while True:
+        while True and self.state == State.State.leader:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -523,7 +526,6 @@ class Member:
 
                     # Remove the old follower from the list of followers to be removed
                     self.unresponsive_followers.remove(follower_to_remove)
-
                 else:
                     lib.print_message('I did not get enough responses to commit to the removal of the follower', self.id)
 
@@ -586,7 +588,7 @@ class Member:
 
     # Listening/responding loop - follower
     def do_follower_message_listening(self):
-        while True:
+        while True and self.state == State.State.follower:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -667,17 +669,6 @@ class Member:
                             self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                             self.voted = True
 
-        # # Listen for direct confirmation from the leader that you have been removed from the group
-        # try:
-        #     message, address = self.server_socket.recvfrom(RECV_BYTES)
-        #     message = pickle.loads(message)
-        # except socket.timeout:
-        #     pass
-        # else:
-        #     if message.get_message_type() == MessageType.MessageType.removal:
-        #         lib.print_message('I have been removed from the group', self.id)
-        #         self.state = State.State.outsider
-
     @staticmethod
     def multigroup_network_outsider_listener(starting_id):
         groups = set()
@@ -686,14 +677,14 @@ class Member:
             MULTIGROUP_MULTICAST_ADDRESS)
         # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
         search_timeout_point = lib.get_random_timeout()
-        lib.print_message("listening for all leader messages", starting_id)
+        lib.print_message("Listening for groups to join...", starting_id)
         while True:
             try:
                 message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
             except socket.timeout:
                 if groups and time.time() > search_timeout_point:
-                    lib.print_message("finished listening for all leader messages", starting_id)
+                    lib.print_message("finished listening for groups to join.", starting_id)
                     break
             else:
                 multicast_address, multicast_port = message.get_group_address()
