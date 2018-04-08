@@ -742,78 +742,7 @@ if __name__ == "__main__":
 
         else:   # Not a group founder - join all currently available groups
             # Listen for heartbeat messages from leaders
-# <<<<<<< HEAD
-#             multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
-#             group_ids_found = []
-#
-#             search_timeout_point = lib.get_random_timeout()
-#
-#             while True:
-#                 try:
-#                     message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
-#                     message = pickle.loads(message)
-#                 except socket.timeout:
-#                     # Stop searching if at least one group to join has been found, and sufficient time has been spent searching for other groups
-#                     if len(group_ids_found) > 0 and time.time() > search_timeout_point:
-#                         break
-#                     else:
-#                         pass
-#                 else:
-#                     # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
-#                     if message.get_message_type() == MessageType.MessageType.heartbeat:
-#
-#                         group_id = message.get_group_id()
-#
-#                         # Only start one member thread per group to join
-#                         if not group_ids_found.__contains__(group_id):
-#                             group_ids_found.append(group_id)
-#
-#                             # Check whether this is a demo of network partition or not
-#                             if len(sys.argv) > 2:
-#                                 partition_timer = int(sys.argv[2])
-#                                 member = Member(starting_id, group_id, group_founder, partition_timer)
-#                             else:
-#                                 member = Member(starting_id, group_id, group_founder, 0)
-# =======
-# >>>>>>> 4f1480666329ebae7a2cbda948df66b8b2f43c0e
-
             Member.multigroup_network_outsider_listener(starting_id)
-
-            # multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
-            #
-            # group_ids_found = []
-            #
-            # search_timeout_point = lib.get_random_timeout()
-            #
-            # while True:
-            #     try:
-            #         message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
-            #         message = pickle.loads(message)
-            #     except socket.timeout:
-            #         # Stop searching if at least one group to join has been found, and sufficient time has been spent searching for other groups
-            #         if len(group_ids_found) > 0 and time.time() > search_timeout_point:
-            #             break
-            #         else:
-            #             pass
-            #     else:
-            #         # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
-            #         if message.get_message_type() == MessageType.MessageType.heartbeat:
-            #
-            #             group_id = message.get_group_id()
-            #
-            #             # Only start one member thread per group to join
-            #             if not group_ids_found.__contains__(group_id):
-            #                 group_ids_found.append(group_id)
-            #
-            #                 # Check whether this is a demo of network partition or not
-            #                 if len(sys.argv) > 2:
-            #                     partition_timer = int(sys.argv[2])
-            #                     member = Member(starting_id, group_id, group_founder, partition_timer)
-            #                 else:
-            #                     member = Member(starting_id, group_id, group_founder, 0)
-            #
-            #                 _thread.start_new_thread(member.start_serving, ())
-
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
     except Exception as main_exception:
