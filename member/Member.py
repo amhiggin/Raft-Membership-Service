@@ -690,11 +690,11 @@ class Member:
         lib.print_message("listening for all leader messages", starting_id)
         while True:
             try:
-                message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
-                message = pickle.loads(message)
                 if groups and time.time() > search_timeout_point:
                     lib.print_message("finished listening for all groups", starting_id)
                     break
+                message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
             except socket.timeout:
                 pass
             else:

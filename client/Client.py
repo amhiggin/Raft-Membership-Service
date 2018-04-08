@@ -8,7 +8,7 @@ import client.ClientLib as lib
 from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
-DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- g to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
+DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- 3 to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
 DISPLAY_REQUEST_FOR_GROUP_ADDRESS = "Enter the name of the group:\n"
 REQUEST_TIMED_OUT = "The request timed out. There may have been an issue. Try again!"
 USAGE_MESSAGE = "Usage: <port_num>"
@@ -39,12 +39,15 @@ def main(socket_port):
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Deletion response: {0}".format(deletion_response))
-            elif user_input == 'x':
-                running = False
-            elif user_input == 'g':
+            elif user_input == '3':
                 '''show all groups in this block'''
                 groups = lib.listen_for_groups(group_multicast_socket)
-                lib.print_message("All active groups are: " + str(groups))
+                if groups:
+                    lib.print_message("All active groups are: " + str(groups))
+                else:
+                    lib.print_message("No active groups found")
+            elif user_input == 'x':
+                running = False
             else:
                 lib.print_message(TRY_AGAIN_.format(user_input))
     except Exception as e1:

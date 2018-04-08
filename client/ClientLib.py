@@ -87,11 +87,11 @@ def listen_for_groups(group_listener_socket):
     print_message("listening for all groups")
     while True:
         try:
-            message, sender = group_listener_socket.recvfrom(RECV_BYTES)
-            message = pickle.loads(message)
-            if groups and time.time() > search_timeout_point:
+            if time.time() > search_timeout_point:
                 print_message("finished listening for all groups")
                 break
+            message, sender = group_listener_socket.recvfrom(RECV_BYTES)
+            message = pickle.loads(message)
         except socket.timeout:
             pass
         else:
