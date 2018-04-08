@@ -23,19 +23,39 @@ import member.GroupView as GroupView
 import member.MemberLib as lib
 from member import State
 import Message as Message
+import GroupAddressMessage
 import MessageDataType
 import MessageType
+import uuid
+
+import zlib
+
+'''  Server constants '''
+SERVER_PORT = 45678  # Review
+DEFAULT_STATE = State.State.follower
+MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
+MULTICAST_PORT = 45678
+PARTITION_MULTICAST_PORT = 45679
+PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
+MULTIGROUP_MULTICAST_ADDRESS = '224.3.29.73'
+MULTIGROUP_MULTICAST_PORT = 45680
+CLIENT_LISTENING_PORT = 56789
+GROUPVIEW_CONSENSUS_PORT = 54321
+
+''' Generic constants '''
+RECV_BYTES = 2048#1024
+SLEEP_TIMEOUT = 1
 
 
 class Member:
 
-    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0):
+    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0, multicast_port=MULTICAST_PORT, multicast_address=MULTICAST_ADDRESS):
         self.id = _id
         self.group_id = _group_id
-        self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
         self.agreement_socket = lib.setup_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
-        self.multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+        self.multicast_listener_socket = lib.setup_multicast_listener_socket(multicast_port, multicast_address)
         self.client_listener_socket = None
+        self.server_socket = lib.setup_server_socket(multicast_address)
 
         # Configure logging
         self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
@@ -111,6 +131,23 @@ class Member:
         self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
         print('Node ' + self.id + ' is now in a network partition.\n')
 
+    def multigroup_network_leader_multicast(self):
+        multigroup_multicast_socket_server = lib.setup_server_socket(MULTICAST_ADDRESS)
+        leader_multigroup_address = (MULTIGROUP_MULTICAST_ADDRESS, MULTIGROUP_MULTICAST_PORT)
+        leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+
+        lib.print_message("multicasting group information to any outsiders listening", self.id)
+        multigroup_multicast_socket_server.sendto(
+            pickle.dumps(GroupAddressMessage.GroupAddressMessage(
+                self.group_id,
+                leader_multicast_group)),
+            # self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
+            leader_multigroup_address)
+        try:
+            time.sleep(SLEEP_TIMEOUT)
+        except Exception as e100:
+             lib.print_message('e100: ' + str(e100), self.id)
+
     # Startup node, configure socket
     def start_serving(self):
         lib.print_message('Online in state {0}'.format(self.state), self.id)
@@ -120,8 +157,8 @@ class Member:
         try:
             _thread.start_new_thread(self.heartbeat_and_election_timer_thread, ())
             self.running = True
-            _thread.start_new_thread(member.listen_for_client, ())
-            _thread.start_new_thread(member.do_follower_client_listening, ())
+            _thread.start_new_thread(self.listen_for_client, ())
+            _thread.start_new_thread(self.do_follower_client_listening, ())
 
             # Network partition thread
             if self.partition_timer != 0:
@@ -132,6 +169,7 @@ class Member:
                 # If you are the leader, regularly send heartbeat messages via multicast
                 if self.state == State.State.leader and self.running is True:
                     self.do_leader_message_listening()
+                    self.multigroup_network_leader_multicast()
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
                     self.do_follower_message_listening()
@@ -629,6 +667,53 @@ class Member:
                             self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                             self.voted = True
 
+        # # Listen for direct confirmation from the leader that you have been removed from the group
+        # try:
+        #     message, address = self.server_socket.recvfrom(RECV_BYTES)
+        #     message = pickle.loads(message)
+        # except socket.timeout:
+        #     pass
+        # else:
+        #     if message.get_message_type() == MessageType.MessageType.removal:
+        #         lib.print_message('I have been removed from the group', self.id)
+        #         self.state = State.State.outsider
+
+    @staticmethod
+    def multigroup_network_outsider_listener(starting_id):
+        groups = set()
+        multigroup_multicast_socket_listener = lib.setup_multicast_listener_socket(
+            MULTIGROUP_MULTICAST_PORT,
+            MULTIGROUP_MULTICAST_ADDRESS)
+        # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
+        search_timeout_point = lib.get_random_timeout()
+        lib.print_message("listening for all leader messages", starting_id)
+        while True:
+            try:
+                message, sender = multigroup_multicast_socket_listener.recvfrom(RECV_BYTES)
+                message = pickle.loads(message)
+            except socket.timeout:
+                if groups and time.time() > search_timeout_point:
+                    lib.print_message("finished listening for all leader messages", starting_id)
+                    break
+            else:
+                multicast_address, multicast_port = message.get_group_address()
+                group_id = message.get_group_id()
+                if group_id in groups:
+                    continue
+                else:
+                    groups.add(group_id)
+                if len(sys.argv) > 2:
+                    partition_timer = int(sys.argv[2])
+                    member = Member(starting_id, group_id, group_founder, partition_timer, multicast_address=multicast_address,
+                                multicast_port=multicast_port)
+                else:
+                    member = Member(starting_id, group_id, group_founder, 0, multicast_address=multicast_address,
+                                multicast_port=multicast_port)
+                lib.print_message('Creating new outsider for ' + multicast_address + ":" + str(multicast_port), starting_id)
+                _thread.start_new_thread(member.start_serving, ())
+
+        # if not leader_responses:
+        #     lib.print_message("no other leaders found", self.id)
 
 if __name__ == "__main__":
     member = None
@@ -657,39 +742,77 @@ if __name__ == "__main__":
 
         else:   # Not a group founder - join all currently available groups
             # Listen for heartbeat messages from leaders
-            multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
-            group_ids_found = []
+# <<<<<<< HEAD
+#             multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+#             group_ids_found = []
+#
+#             search_timeout_point = lib.get_random_timeout()
+#
+#             while True:
+#                 try:
+#                     message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
+#                     message = pickle.loads(message)
+#                 except socket.timeout:
+#                     # Stop searching if at least one group to join has been found, and sufficient time has been spent searching for other groups
+#                     if len(group_ids_found) > 0 and time.time() > search_timeout_point:
+#                         break
+#                     else:
+#                         pass
+#                 else:
+#                     # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
+#                     if message.get_message_type() == MessageType.MessageType.heartbeat:
+#
+#                         group_id = message.get_group_id()
+#
+#                         # Only start one member thread per group to join
+#                         if not group_ids_found.__contains__(group_id):
+#                             group_ids_found.append(group_id)
+#
+#                             # Check whether this is a demo of network partition or not
+#                             if len(sys.argv) > 2:
+#                                 partition_timer = int(sys.argv[2])
+#                                 member = Member(starting_id, group_id, group_founder, partition_timer)
+#                             else:
+#                                 member = Member(starting_id, group_id, group_founder, 0)
+# =======
+# >>>>>>> 4f1480666329ebae7a2cbda948df66b8b2f43c0e
 
-            search_timeout_point = lib.get_random_timeout()
+            Member.multigroup_network_outsider_listener(starting_id)
 
-            while True:
-                try:
-                    message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
-                    message = pickle.loads(message)
-                except socket.timeout:
-                    # Stop searching if at least one group to join has been found, and sufficient time has been spent searching for other groups
-                    if len(group_ids_found) > 0 and time.time() > search_timeout_point:
-                        break
-                    else:
-                        pass
-                else:
-                    # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
-                    if message.get_message_type() == MessageType.MessageType.heartbeat:
-
-                        group_id = message.get_group_id()
-
-                        # Only start one member thread per group to join
-                        if not group_ids_found.__contains__(group_id):
-                            group_ids_found.append(group_id)
-
-                            # Check whether this is a demo of network partition or not
-                            if len(sys.argv) > 2:
-                                partition_timer = int(sys.argv[2])
-                                member = Member(starting_id, group_id, group_founder, partition_timer)
-                            else:
-                                member = Member(starting_id, group_id, group_founder, 0)
-
-                            _thread.start_new_thread(member.start_serving, ())
+            # multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+            #
+            # group_ids_found = []
+            #
+            # search_timeout_point = lib.get_random_timeout()
+            #
+            # while True:
+            #     try:
+            #         message, sender = multicast_listener_socket.recvfrom(RECV_BYTES)
+            #         message = pickle.loads(message)
+            #     except socket.timeout:
+            #         # Stop searching if at least one group to join has been found, and sufficient time has been spent searching for other groups
+            #         if len(group_ids_found) > 0 and time.time() > search_timeout_point:
+            #             break
+            #         else:
+            #             pass
+            #     else:
+            #         # For each heartbeat received, start a new member instance (potential issue - multiple leaders?)
+            #         if message.get_message_type() == MessageType.MessageType.heartbeat:
+            #
+            #             group_id = message.get_group_id()
+            #
+            #             # Only start one member thread per group to join
+            #             if not group_ids_found.__contains__(group_id):
+            #                 group_ids_found.append(group_id)
+            #
+            #                 # Check whether this is a demo of network partition or not
+            #                 if len(sys.argv) > 2:
+            #                     partition_timer = int(sys.argv[2])
+            #                     member = Member(starting_id, group_id, group_founder, partition_timer)
+            #                 else:
+            #                     member = Member(starting_id, group_id, group_founder, 0)
+            #
+            #                 _thread.start_new_thread(member.start_serving, ())
 
         while 1:
             sys.stdout.flush()    # Print output to console instantaneously
