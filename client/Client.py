@@ -44,7 +44,7 @@ def main(socket_port):
             elif user_input == 'g':
                 '''show all groups in this block'''
                 groups = lib.listen_for_groups(group_multicast_socket)
-                lib.print_message("groups are: " + str(groups))
+                lib.print_message("All active groups are: " + str(groups))
             else:
                 lib.print_message(TRY_AGAIN_.format(user_input))
     except Exception as e1:
