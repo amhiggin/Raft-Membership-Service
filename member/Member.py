@@ -123,8 +123,9 @@ class Member:
 
     def network_partition_thread(self):
         time.sleep(self.partition_timer)
-        member.Constants.MULTICAST_ADDRESS = member.Constants.PARTITION_MULTICAST_ADDRESS
-        member.Constants.MULTICAST_PORT = member.Constants.PARTITION_MULTICAST_PORT
+        # member.Constants.MULTICAST_ADDRESS = member.Constants.PARTITION_MULTICAST_ADDRESS
+        self.multicast_address = member.Constants.PARTITION_MULTICAST_ADDRESS
+        self.multicast_port = member.Constants.PARTITION_MULTICAST_PORT
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.multicast_listener_socket.settimeout(0.2)
         self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -135,9 +136,9 @@ class Member:
         print('Node ' + self.id + ' is now in a network partition.\n')
 
     def multigroup_network_leader_multicast(self):
-        multigroup_multicast_socket_server = lib.setup_server_socket(MULTICAST_ADDRESS)
+        multigroup_multicast_socket_server = lib.setup_server_socket(MULTIGROUP_MULTICAST_ADDRESS)
         leader_multigroup_address = (MULTIGROUP_MULTICAST_ADDRESS, MULTIGROUP_MULTICAST_PORT)
-        leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+        leader_multicast_group = (self.multicast_address, self.multicast_port)
 
         lib.print_message("multicasting group information to any outsiders listening", self.id)
         multigroup_multicast_socket_server.sendto(
@@ -200,7 +201,7 @@ class Member:
                     self.agreement_socket.sendto(pickle.dumps(Message.Message(
                         self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
                         self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                        (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                        (self.multicast_address, CONSENSUS_PORT))
 
                     lib.get_groupview_consensus(self)
                     lib.send_client_groupview_response(self, client)
@@ -251,19 +252,19 @@ class Member:
                         if decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
                             response = ''
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                              response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                              response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
                     # Group deletion request
                     elif decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_request:
                         response_type = MessageType.MessageType.member_group_delete_response
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                            response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
                     # Group deletion confirmation/finalisation request
                     elif decoded_message.get_message_type() is MessageType.MessageType.finalise_member_removal_request:
                         # TODO @Amber remove notion of group from the follower
                         response = REMOVED
                         response_type = MessageType.MessageType.finalise_member_removal_response
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            response_type, None, self.id, response)), (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                            response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
                 except socket.timeout:
                     lib.print_message("timed out", self.id)
                     break
@@ -334,7 +335,7 @@ class Member:
             votes_received = 1  # Start by voting for itself
             voters = []
 
-            multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+            multicast_group = (self.multicast_address, self.multicast_port)
             self.server_socket.sendto(
                 pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote_request, None, self.id, '', None, self.index_of_latest_committed_log)),
                 multicast_group)
@@ -399,7 +400,7 @@ class Member:
         # Multicast heartbeat messages for followers
         if self.state == State.State.leader:
             try:
-                leader_multicast_group = (MULTICAST_ADDRESS, MULTICAST_PORT)
+                leader_multicast_group = (self.multicast_address, self.multicast_port)
 
                 # If there are outsiders waiting to join, and there are no members to be removed
                 # Prepare the other nodes to add the outsider
