@@ -6,6 +6,8 @@ import time
 import Message as Message
 import MessageType as MessageType
 
+GROUPS_INFO = dict()
+
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 56789                # Port on which the group is listening for client requests
 RECV_BYTES = 1024
@@ -43,10 +45,11 @@ def get_group_listener_socket():
     return multicast_listener_socket
 
 
-def send_service_request(self_socket, group_address):
-    print_message('Sending a request for the members of group {0}'.format(group_address))
+def send_service_request(self_socket, group_id):
+    print_message('Sending a request for the members of group {0}'.format(group_id))
     message = Message.Message(None, -1, MessageType.MessageType.service_request, '', None, None)
-    multicast_group = (GROUP_ADDRESS, GROUP_PORT)
+    self_socket.bind(('', GROUPS_INFO[group_id]["port"]))
+    multicast_group = (GROUPS_INFO[group_id]["address"], GROUPS_INFO[group_id]["port"])
 
     try:
         self_socket.sendto(pickle.dumps(message), multicast_group)
@@ -82,6 +85,7 @@ def send_delete_request(self_socket, group_address):
 
 def listen_for_groups(group_listener_socket):
     groups = set()
+    GROUPS_INFO = dict()
     # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
     search_timeout_point = get_timeout()
     print_message("listening for all groups")
@@ -102,6 +106,10 @@ def listen_for_groups(group_listener_socket):
             else:
                 print_message("new group found!")
                 groups.add(group_id)
+                GROUPS_INFO[group_id] = {
+                    "address":multicast_address,
+                    "port":multicast_port
+                }
     return groups
 
 def get_timeout():
