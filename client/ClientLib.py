@@ -65,10 +65,11 @@ def send_service_request(self_socket, group_id):
     return None
 
 
-def send_delete_request(self_socket, group_address):
-    print_message('Sending a request to delete group {0}'.format(group_address))
+def send_delete_request(self_socket, group_id):
+    group_info = GROUPS_INFO[group_id]
+    print_message('Sending a request to delete group {0}'.format(group_id))
     message = Message.Message(None, -1, MessageType.MessageType.client_group_delete_request, '', None, None)
-    multicast_group = (GROUP_ADDRESS, GROUP_PORT)
+    multicast_group = (group_info["address"], GROUP_PORT)
 
     try:
         self_socket.sendto(pickle.dumps(message), multicast_group)
