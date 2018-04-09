@@ -112,6 +112,7 @@ def listen_for_groups(group_listener_socket):
                     "address":multicast_address,
                     "port":multicast_port
                 }
+                print_message(str(GROUPS_INFO))
     return groups
 
 
