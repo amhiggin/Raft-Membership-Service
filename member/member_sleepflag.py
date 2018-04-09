@@ -107,7 +107,7 @@ class Member:
                     self.heartbeat_timeout_point = lib.get_random_timeout()
                     self.heartbeat_received = False
                 else:
-                    if time.time() > self.heartbeat_timeout_point && time.time()<= self.Sleep_flag_time:
+                    if time.time() > self.heartbeat_timeout_point and time.time()<= self.Sleep_flag_time:
                         lib.print_message('Heartbeat timeout - I am now a candidate', self.id)
                         self.state = State.State.candidate
                         self.ready_to_run_for_election = True
