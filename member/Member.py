@@ -708,12 +708,22 @@ class Member:
                     continue
                 else:
                     groups.add(group_id)
-                if len(sys.argv) > 2:
+                if len(sys.argv) == 2:
                     partition_timer = int(sys.argv[2])
                     member = Member(starting_id, group_id, group_founder, partition_timer, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                 else:
                     member = Member(starting_id, group_id, group_founder, 0, 0, 0, multicast_address=multicast_address,
+                                multicast_port=multicast_port)
+                if len(sys.argv) == 4:
+                    node_wait_time = int(sys.argv[3])
+                    node_sleep_time = int(sys.argv[4])
+                    if node_sleep_time == 0:
+                        member = Member(starting_id, group_id, group_founder, 0, 0, 0, multicast_address=multicast_address,
+                                multicast_port=multicast_port)
+                    else:
+                        member = Member(starting_id, group_id, group_founder, 0, node_wait_time=node_wait_time,
+                                node_sleep_time=node_sleep_time, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                 lib.print_message('Creating new outsider for ' + multicast_address + ":" + str(multicast_port), starting_id)
                 _thread.start_new_thread(member.start_serving, ())
@@ -741,14 +751,6 @@ if __name__ == "__main__":
                 member = Member(starting_id, group_id, group_founder, partition_timer)
             else:
                 member = Member(starting_id, group_id, group_founder, 0)
-
-            if len(sys.argv) == 4:
-                node_wait_time = int(sys.argv[3])
-                node_sleep_time = int(sys.argv[4])
-                if node_sleep_time == 0:
-                    member = Member(starting_id, group_id, group_founder, 0)
-                else:
-                    member = Member(starting_id, group_id, group_founder, 0, node_wait_time=node_wait_time, node_sleep_time=node_sleep_time)
 
             _thread.start_new_thread(member.start_serving, ())
 
