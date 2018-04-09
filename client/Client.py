@@ -1,14 +1,19 @@
 '''
-    This is a client which will connect to the distributed system for test purposes.
-    To be decided: communication protocol, etc.
+    This is a client which can :
+    (i)     Find all available groups;
+    (ii)    Request the group membership of an available group;
+    (iii)   Send a delete request to an available group.
 '''
 import sys
+
+OPTION_1 = "1"
+OPTION_2 = "2"
+OPTION_3 = "3"
 
 sys.path.append(".")
 sys.path.append("../")
 
 import client.ClientLib as lib
-# from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
 DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership, given its address.\n\t- 2 to delete a group, given its address\n\t- 3 to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
@@ -28,21 +33,21 @@ def main(socket_port):
     try:
         while running:
             user_input = input(DISPLAY_USER_OPTIONS)
-            if user_input == "1":
+            if user_input == OPTION_1:
                 group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 group_view = lib.send_service_request(self_socket, group_address)
                 if group_view is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Group response: The group view is {0}".format(group_view))
-            elif user_input == "2":
+            elif user_input == OPTION_2:
                 group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 deletion_response = lib.send_delete_request(self_socket, group_address)
                 if deletion_response is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Deletion response: {0}".format(deletion_response))
-            elif user_input == '3':
+            elif user_input == OPTION_3:
                 '''show all groups in this block'''
                 groups = lib.listen_for_groups(group_multicast_socket)
                 if groups:

@@ -1,14 +1,15 @@
 '''
     This is the view of the membership of the group that each member has at any given time.
-    The member should update this groupview as part of the protocol.
     The group view is updated with no more than one change at a time - either an addition or removal of a member.
     Using a list ensures ordering whilst also allowing for arbitrary removal of nodes at any position.
-    Checks are in place to prevent duplicates from being added.
+    Safety checks are in place to prevent duplicates from being added, or non-existent nodes from being removed.
 '''
+import datetime
 import sys
 import time
-import datetime
+
 sys.path.append("../")
+
 
 class GroupView(object):
 

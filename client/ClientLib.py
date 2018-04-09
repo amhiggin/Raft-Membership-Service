@@ -1,6 +1,7 @@
 import datetime
 import pickle
-import socket, struct
+import socket
+import struct
 import time
 
 import Message as Message
@@ -88,11 +89,11 @@ def listen_for_groups(group_listener_socket):
     GROUPS_INFO.clear()
     # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
     search_timeout_point = get_timeout()
-    print_message("listening for all groups")
+    print_message("Listening for all available groups...")
     while True:
         try:
             if time.time() > search_timeout_point:
-                print_message("finished listening for all groups")
+                print_message("Finished listening for all groups.")
                 break
             message, sender = group_listener_socket.recvfrom(RECV_BYTES)
             message = pickle.loads(message)
@@ -104,13 +105,14 @@ def listen_for_groups(group_listener_socket):
             if group_id in groups:
                 continue
             else:
-                print_message("new group found!")
+                print_message("New group found!")
                 groups.add(group_id)
                 GROUPS_INFO[str(group_id)] = {
                     "address":multicast_address,
                     "port":multicast_port
                 }
     return groups
+
 
 def get_timeout():
     return time.time() + TIMEOUT_LISTEN_FOR_GROUPS

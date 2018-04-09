@@ -1,7 +1,10 @@
 '''
-    This is one of the server nodes in the RAFT distributed system. The service provided to the client will be to give them the current membership of the group.
-    Each member has a group view, a state (follower/candidate/leader), and a log of what updates have been performed to the group membership.
-    UDP is used for communication. Heartbeats from a single leader are used to maintain the group view of every node.
+    This is one of the server nodes in the RAFT distributed system.
+    -   The service provided to the client is to give them the current membership of the group when requested.
+    -   The client can also send a request to delete the group.
+    Each member has a group view, a state (follower/candidate/leader), and a log of what updates have been performed to the group(s) they are a part of.
+    Each node can logically be a member of multiple groups, and separate logs and group views are maintained for each.
+    UDP is used for communication. Heartbeats from a single leader of each group are used to maintain the group view of every node.
 '''
 import _thread
 import pickle
@@ -244,8 +247,8 @@ class Member:
         except Exception as e:
             lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
 
-    # Removes each members of the group on a consensus basis
-    # If the leader were to fail during deletion, the group view will hence remain consistent.
+    ''' Removes each members of the group on a consensus basis. 
+        If the leader were to fail during deletion, the group view will hence remain consistent. '''
     def remove_group_members_safely(self):
         intermediate_group_view = self.group_view
 
@@ -613,14 +616,9 @@ class Member:
                 break
             else:
                 if message.get_group_id() == self.group_id: # Ignore multicast messages from other groups
-                    #lib.print_message('FOLLOWER: I GOT A MESSAGE', self.id)
                     if message.get_term() > self.term and message.get_member_id() != str(self.id) and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
                         self.term = int(message.get_term())
                         self.voted = False
-
-                    # # updating group view of followers
-                    # if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_message_subtype() == MessageDataType.MessageType.group_membership_update:
-                    #     self.group_view = message.get_data()
 
                     # A follower might be removed from the group
                     # Do not create a new log entry if this is a re-transmission from the leader (i.e. the leader already sent a message about this, but didn't get enough responses to commit it)
@@ -694,7 +692,6 @@ class Member:
         multigroup_multicast_socket_listener = lib.setup_multicast_listener_socket(
             MULTIGROUP_MULTICAST_PORT,
             MULTIGROUP_MULTICAST_ADDRESS)
-        # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
         search_timeout_point = lib.get_random_timeout()
         lib.print_message("Listening for groups to join...", starting_id)
         while True:
