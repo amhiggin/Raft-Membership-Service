@@ -152,3 +152,6 @@ def extract_log_from_message(log_file, message):
     compressed_data = message.get_data()
     decompressed_data = pickle.loads(zlib.decompress(compressed_data))
     log_file.write(decompressed_data)
+
+def get_wait_time(wait_time):
+    return time.time() + wait_time
