@@ -9,7 +9,7 @@ import MessageType as MessageType
 MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
 MULTICAST_PORT = 56789                # Port on which the group is listening for client requests
 RECV_BYTES = 1024
-TIMEOUT_PERIOD_SECONDS = 30
+TIMEOUT_PERIOD_SECONDS = 60           # Long timeout to allow for deletion confirmation to be given
 GROUP_PORT = 56789
 GROUP_ADDRESS = '224.3.29.71'
 SUCCESS = "success"

@@ -6,9 +6,8 @@
     Checks are in place to prevent duplicates from being added.
 '''
 import sys
-
+import time
 import datetime
-
 sys.path.append("../")
 
 class GroupView(object):
@@ -58,4 +57,4 @@ class GroupView(object):
         self.members = []
 
     def get_timestamp(self):
-        return datetime.datetime.fromtimestamp(datetime.time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
