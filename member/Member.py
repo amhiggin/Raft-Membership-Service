@@ -173,11 +173,14 @@ class Member:
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
                     if self.node_wait_time != 0:
+                        lib.print_message("Node failure Demo:", self.id)
                         if lib.get_wait_time(self.node_wait_time) > time.time():
                             self.do_follower_message_listening()
                         else:
+                            lib.print_message("Node failing...", self.id)
                             time.sleep(self.node_sleep_time)
                             self.node_wait_time = 0
+                            lib.print_message("Failed Node recovering...", self.id)
                     self.do_follower_message_listening()
                 # If you are a candidate, request votes until you are elected or detect a new leader
                 if self.state == State.State.candidate and self.running is True:
@@ -708,20 +711,21 @@ class Member:
                     continue
                 else:
                     groups.add(group_id)
-                if len(sys.argv) == 2:
+                if len(sys.argv) == 3:
                     partition_timer = int(sys.argv[2])
                     member = Member(starting_id, group_id, group_founder, partition_timer, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                 else:
                     member = Member(starting_id, group_id, group_founder, 0, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
-                if len(sys.argv) == 4:
+                if len(sys.argv) == 5:
                     node_wait_time = int(sys.argv[3])
                     node_sleep_time = int(sys.argv[4])
                     if node_sleep_time == 0:
                         member = Member(starting_id, group_id, group_founder, 0, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                     else:
+                        lib.print_message("Running node failure demo", starting_id)
                         member = Member(starting_id, group_id, group_founder, 0, node_wait_time=node_wait_time,
                                 node_sleep_time=node_sleep_time, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
@@ -746,7 +750,7 @@ if __name__ == "__main__":
             group_id = str(uuid.uuid4())
 
             # Check whether this is a demo of network partition or not
-            if len(sys.argv) == 2:
+            if len(sys.argv) == 3:
                 partition_timer = int(sys.argv[2])
                 member = Member(starting_id, group_id, group_founder, partition_timer)
             else:
