@@ -6,10 +6,6 @@
 '''
 import sys
 
-OPTION_1 = "1"
-OPTION_2 = "2"
-OPTION_3 = "3"
-
 sys.path.append(".")
 sys.path.append("../")
 
@@ -30,24 +26,24 @@ def main(socket_port):
     running = True
     lib.print_message(WELCOME_MESSAGE.format(socket_port))
 
-    try:
-        while running:
+    while running:
+        try:
             user_input = input(DISPLAY_USER_OPTIONS)
-            if user_input == OPTION_1:
+            if user_input == "1":
                 group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 group_view = lib.send_service_request(self_socket, group_address)
                 if group_view is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Group response: The group view is {0}".format(group_view))
-            elif user_input == OPTION_2:
+            elif user_input == "2":
                 group_address = input(DISPLAY_REQUEST_FOR_GROUP_ADDRESS)
                 deletion_response = lib.send_delete_request(self_socket, group_address)
                 if deletion_response is None:
                     lib.print_message(REQUEST_TIMED_OUT)
                 else:
                     lib.print_message("Deletion response: {0}".format(deletion_response))
-            elif user_input == OPTION_3:
+            elif user_input == "3":
                 '''show all groups in this block'''
                 groups = lib.listen_for_groups(group_multicast_socket)
                 if groups:
@@ -58,11 +54,10 @@ def main(socket_port):
                 running = False
             else:
                 lib.print_message(TRY_AGAIN_.format(user_input))
-    except Exception as e1:
-        lib.print_message('An error occurred during client operation: ' + str(e1))
-    finally:
-        lib.print_message(EXIT_MESSAGE)
-        exit(1)
+        except Exception as e1:
+            lib.print_message('An error occurred during client operation: ' + str(e1))
+    lib.print_message(EXIT_MESSAGE)
+    exit(1)
 
 
 if __name__ == "__main__":
