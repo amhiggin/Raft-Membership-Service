@@ -207,7 +207,7 @@ class Member:
                 while self.running and self.state is State.State.leader:
                     incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
                     try:
-                        _thread.start_new_thread(self.process_client_request_thread(incoming_message, client),
+                        _thread.start_new_thread(self.process_client_request_thread,
                                                  (incoming_message, client))
                     except Exception as consensus_response_exception:
                         lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
@@ -242,8 +242,8 @@ class Member:
                     lib.print_message("Received group deletion request from {0}".format(client), self.id)
                     self.deleting_group = True
                     self.remove_group_members_safely()
-                    self.running = False
                     lib.send_deletion_response_to_client(self, client, SUCCESS)
+                    self.running = False
         except Exception as e:
             lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
 
@@ -253,13 +253,14 @@ class Member:
         intermediate_group_view = self.group_view
 
         while self.group_view.get_size() > 1:
-            # We still have group members: remove them one at a time
-            self.unresponsive_followers.append(intermediate_group_view.get_members().pop())
+            if len(self.unresponsive_followers) == 0:
+                # We still have group members: remove them one at a time
+                self.unresponsive_followers.append(intermediate_group_view.get_members().pop())
 
-            while self.group_view != intermediate_group_view:
-                # Until we have removed this node, we wait.
-                pass
-            intermediate_group_view = self.group_view
+                while self.group_view != intermediate_group_view:
+                    # Until we have removed this node, we wait.
+                    pass
+                intermediate_group_view = self.group_view
 
         self.group_view.remove_member(self.id)
         lib.print_message("Successfully removed all members from the group.", self.id)
