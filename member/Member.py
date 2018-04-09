@@ -173,11 +173,11 @@ class Member:
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
                     if self.node_wait_time != 0:
-                        lib.print_message("Node failure Demo:", self.id)
                         if lib.get_wait_time(self.node_wait_time) > time.time():
+                            lib.print_message("Node failure Demo: WAIT for " + str(self.node_wait_time) + str(type(self.node_wait_time)), self.id)
                             self.do_follower_message_listening()
                         else:
-                            lib.print_message("Node failing...", self.id)
+                            lib.print_message("Node failure Demo: FAIL", self.id)
                             time.sleep(self.node_sleep_time)
                             self.node_wait_time = 0
                             lib.print_message("Failed Node recovering...", self.id)
