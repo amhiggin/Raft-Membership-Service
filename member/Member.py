@@ -165,6 +165,8 @@ class Member:
                 print('Starting network partition timer')
                 _thread.start_new_thread(self.network_partition_thread, ())
 
+            node_failure_demo_timeout = lib.get_wait_time(self.node_wait_time)
+
             while self.running:
                 # If you are the leader, regularly send heartbeat messages via multicast
                 if self.state == State.State.leader and self.running is True:
@@ -173,11 +175,11 @@ class Member:
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
                     if self.node_wait_time != 0:
-                        if lib.get_wait_time(self.node_wait_time) > time.time():
-                            lib.print_message("Node failure Demo: WAIT for " + str(self.node_wait_time) + str(type(self.node_wait_time)), self.id)
+                        if node_failure_demo_timeout > time.time():
+                            lib.print_message("Node failure Demo: WAIT for " + str(self.node_wait_time) + " seconds...", self.id)
                             self.do_follower_message_listening()
                         else:
-                            lib.print_message("Node failure Demo: FAIL", self.id)
+                            lib.print_message("Node failure Demo: FAIL for " + str(self.node_sleep_time) + " seconds...", self.id)
                             time.sleep(self.node_sleep_time)
                             self.node_wait_time = 0
                             lib.print_message("Failed Node recovering...", self.id)
