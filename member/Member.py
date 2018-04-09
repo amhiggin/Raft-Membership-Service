@@ -203,7 +203,7 @@ class Member:
     def listen_for_client(self):
         while True and self.running is True:
             try:
-                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
+                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, self.multicast_address)
                 while self.running and self.state is State.State.leader:
                     incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
                     try:
@@ -234,7 +234,7 @@ class Member:
                         self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None,
                         self.id, '',
                         self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                        (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                        (self.multicast_address, CONSENSUS_PORT))
                     lib.get_groupview_consensus(self)
                     lib.send_client_groupview_response(self, client)
                 # Client request to delete the group
