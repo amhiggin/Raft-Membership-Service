@@ -34,7 +34,7 @@ def setup_client_socket(port, multicast_address):
     client_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    follower_address = ('', port)
+    follower_address = (multicast_address, port)
     client_listener_socket.bind(follower_address)
     client_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
 
