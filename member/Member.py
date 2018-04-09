@@ -18,7 +18,7 @@ sys.path.append(".")
 
 import member.Constants
 from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
-    RECV_BYTES, SLEEP_TIMEOUT, AGREED, REMOVED
+    RECV_BYTES, SLEEP_TIMEOUT, AGREED, REMOVED, PARTITION_MULTICAST_ADDRESS
 
 import member.GroupView as GroupView
 import member.MemberLib as lib
@@ -123,24 +123,31 @@ class Member:
 
     def network_partition_thread(self):
         time.sleep(self.partition_timer)
-        # member.Constants.MULTICAST_ADDRESS = member.Constants.PARTITION_MULTICAST_ADDRESS
-        self.multicast_address = member.Constants.PARTITION_MULTICAST_ADDRESS
-        self.multicast_port = member.Constants.PARTITION_MULTICAST_PORT
+        # Enter partition
+        self.multicast_address = PARTITION_MULTICAST_ADDRESS
+        self.multicast_port = PARTITION_MULTICAST_PORT
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.multicast_listener_socket.settimeout(0.2)
         self.multicast_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        follower_address = ('', member.Constants.MULTICAST_PORT)
+        follower_address = ('', MULTICAST_PORT)
         self.multicast_listener_socket.bind(follower_address)
         # Set the time-to-live for messages to 1 so they do not go further than the local network segment
         self.multicast_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
         print('Node ' + self.id + ' is now in a network partition.\n')
+
+        time.sleep(self.partition_timer)
+        # Heal partition
+        self.multicast_address = MULTICAST_ADDRESS
+        self.multicast_port = MULTICAST_PORT
+        self.multicast_listener_socket = lib.setup_multicast_listener_socket(MULTICAST_PORT, MULTICAST_ADDRESS)
+        self.server_socket = lib.setup_server_socket(MULTICAST_ADDRESS)
+        print('Node ' + self.id + ' is no longer in a network partition.\n')
 
     def multigroup_network_leader_multicast(self):
         multigroup_multicast_socket_server = lib.setup_server_socket(MULTIGROUP_MULTICAST_ADDRESS)
         leader_multigroup_address = (MULTIGROUP_MULTICAST_ADDRESS, MULTIGROUP_MULTICAST_PORT)
         leader_multicast_group = (self.multicast_address, self.multicast_port)
 
-        lib.print_message("multicasting group information to any outsiders listening", self.id)
         multigroup_multicast_socket_server.sendto(
             pickle.dumps(GroupAddressMessage.GroupAddressMessage(
                 self.group_id,
@@ -301,6 +308,7 @@ class Member:
                 self.group_view = message.get_group_view()
                 self.state = State.State.follower
                 self.heartbeat_timeout_point = lib.get_random_timeout()
+                self.term = int(message.get_term())
 
     # Listening/responding loop - candidate
     def do_candidate_message_listening(self):
@@ -318,14 +326,14 @@ class Member:
                                       self.id)
                     self.heartbeat_timeout_point = lib.get_random_timeout()
                     self.state = State.State.follower
-                    self.term = message.get_term()
+                    self.term = int(message.get_term())
 
-                elif message.get_group_id() == self.group_id and message.get_term() >= self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
+                elif message.get_group_id() == self.group_id and message.get_index_of_latest_commited_log() > self.index_of_latest_committed_log and message.get_message_type() == MessageType.MessageType.heartbeat:
                     lib.print_message(
-                        'Candidate: My term is <= that of leader ' + message.get_member_id() + ' - I am now a follower (and will reset my heartbeat timeout)',
+                        'Candidate: My log is behind that of member ' + message.get_member_id() + ' - I am now an outsider',
                         self.id)
                     self.heartbeat_timeout_point = lib.get_random_timeout()
-                    self.state = State.State.follower
+                    self.state = State.State.outsider
 
         # Try to get elected leader
         if self.state == State.State.candidate and self.ready_to_run_for_election == True:
@@ -337,7 +345,7 @@ class Member:
 
             multicast_group = (self.multicast_address, self.multicast_port)
             self.server_socket.sendto(
-                pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote_request, None, self.id, '', None, self.index_of_latest_committed_log)),
+                pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote_request, None, self.id, '', self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log)),
                 multicast_group)
 
             # Listen for votes until your election time is up, or you receive enough votes to become leader
@@ -394,7 +402,7 @@ class Member:
                 if message.get_group_id() == self.group_id and message.get_term() > self.term and message.get_message_type() == MessageType.MessageType.heartbeat:
                     lib.print_message('Leader: my term is < than that of leader ' + message.get_member_id() + ' - I am now a follower',self.id)
                     self.state = State.State.follower
-                    self.term = message.get_term()
+                    self.term = int(message.get_term())
                     break
 
         # Multicast heartbeat messages for followers
@@ -554,7 +562,7 @@ class Member:
                     # NB) What about uncommitted log entries???
 
                     # Send compressed log data
-                    self.server_socket.sendto(pickle.dumps(Message.Message(self.term, self.group_id, MessageType.MessageType.join_acceptance, None,
+                    self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.join_acceptance, None,
                                                                            self.id, compressed_log_data,
                                                                            self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log,
                                                                            self.group_view)), new_member_address)
@@ -598,8 +606,9 @@ class Member:
                 break
             else:
                 if message.get_group_id() == self.group_id: # Ignore multicast messages from other groups
-                    if message.get_term() > self.term and message.get_member_id() != str(self.id):
-                        self.term = message.get_term()
+                    #lib.print_message('FOLLOWER: I GOT A MESSAGE', self.id)
+                    if message.get_term() > self.term and message.get_member_id() != str(self.id) and message.get_index_of_latest_uncommited_log() > self.index_of_latest_uncommitted_log:
+                        self.term = int(message.get_term())
                         self.voted = False
 
                     # # updating group view of followers
@@ -637,6 +646,7 @@ class Member:
                         self.uncommitted_log_entries.append(new_log_entry)
 
                     if message.get_message_type() == MessageType.MessageType.heartbeat and message.get_member_id() != str(self.id):
+                        #lib.print_message('FOLLOWER: I GOT A HEARTBEAT MESSAGE', self.id)
                         self.heartbeat_received = True
                         self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.heartbeat_ack, None, self.id, '')), sender)
 
@@ -667,7 +677,7 @@ class Member:
 
                     elif message.get_message_type() == MessageType.MessageType.vote_request and message.get_member_id() != str(self.id):
                         if self.voted is False and message.get_index_of_latest_commited_log() >= self.index_of_latest_committed_log:
-                            self.term = message.get_term()
+                            self.term = int(message.get_term())
                             self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                             self.voted = True
 
