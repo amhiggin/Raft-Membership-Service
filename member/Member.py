@@ -37,7 +37,7 @@ GROUPVIEW_CONSENSUS_PORT = 54321
 
 class Member:
 
-    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0, multicast_port=MULTICAST_PORT, multicast_address=MULTICAST_ADDRESS):
+    def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0, node_wait_time = 0, node_sleep_time = 0, multicast_port=MULTICAST_PORT, multicast_address=MULTICAST_ADDRESS):
         self.id = _id
         self.group_id = _group_id
         self.multicast_address = multicast_address
@@ -46,6 +46,8 @@ class Member:
         self.multicast_listener_socket = lib.setup_multicast_listener_socket(multicast_port, multicast_address)
         self.client_listener_socket = None
         self.server_socket = lib.setup_server_socket(multicast_address)
+        self.node_wait_time = node_wait_time
+        self.node_sleep_time = node_sleep_time
 
         # Configure logging
         self.log_filename = 'MemberLogs/Group_' + str(self.group_id) + '_Member_' + str(self.id) + ".log"
@@ -170,6 +172,12 @@ class Member:
                     self.multigroup_network_leader_multicast()
                 # If you are a follower, listen for heartbeat messages
                 if self.state == State.State.follower and self.running is True:
+                    if self.node_wait_time != 0:
+                        if lib.get_wait_time(self.node_wait_time) > time.time():
+                            self.do_follower_message_listening()
+                        else:
+                            time.sleep(self.node_sleep_time)
+                            self.node_wait_time = 0
                     self.do_follower_message_listening()
                 # If you are a candidate, request votes until you are elected or detect a new leader
                 if self.state == State.State.candidate and self.running is True:
@@ -309,7 +317,6 @@ class Member:
 
     # Listening/responding loop - candidate
     def do_candidate_message_listening(self):
-
         # Listen for multicast messages from other candidates and leaders (NB: Multicast senders also receive their own messages)
         while True and self.state == State.State.candidate:  # Listen until you timeout (i.e. there are no more messages)
             try:
@@ -703,10 +710,10 @@ class Member:
                     groups.add(group_id)
                 if len(sys.argv) > 2:
                     partition_timer = int(sys.argv[2])
-                    member = Member(starting_id, group_id, group_founder, partition_timer, multicast_address=multicast_address,
+                    member = Member(starting_id, group_id, group_founder, partition_timer, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                 else:
-                    member = Member(starting_id, group_id, group_founder, 0, multicast_address=multicast_address,
+                    member = Member(starting_id, group_id, group_founder, 0, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
                 lib.print_message('Creating new outsider for ' + multicast_address + ":" + str(multicast_port), starting_id)
                 _thread.start_new_thread(member.start_serving, ())
@@ -729,11 +736,19 @@ if __name__ == "__main__":
             group_id = str(uuid.uuid4())
 
             # Check whether this is a demo of network partition or not
-            if len(sys.argv) > 2:
+            if len(sys.argv) == 2:
                 partition_timer = int(sys.argv[2])
                 member = Member(starting_id, group_id, group_founder, partition_timer)
             else:
                 member = Member(starting_id, group_id, group_founder, 0)
+
+            if len(sys.argv) == 4:
+                node_wait_time = int(sys.argv[3])
+                node_sleep_time = int(sys.argv[4])
+                if node_sleep_time == 0:
+                    member = Member(starting_id, group_id, group_founder, 0)
+                else:
+                    member = Member(starting_id, group_id, group_founder, 0, node_wait_time=node_wait_time, node_sleep_time=node_sleep_time)
 
             _thread.start_new_thread(member.start_serving, ())
 
