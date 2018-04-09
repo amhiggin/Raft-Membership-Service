@@ -44,7 +44,7 @@ CLIENT_LISTENING_PORT = 56789
 GROUPVIEW_CONSENSUS_PORT = 54321
 
 ''' Generic constants '''
-RECV_BYTES = 2048#1024
+RECV_BYTES = 2048 #1024
 SLEEP_TIMEOUT = 1
 
 
@@ -53,9 +53,9 @@ class Member:
     def __init__(self, _id, _group_id, is_group_founder, partition_timer = 0, multicast_port=MULTICAST_PORT, multicast_address=MULTICAST_ADDRESS):
         self.id = _id
         self.group_id = _group_id
-        self.agreement_socket = lib.setup_agreement_socket(CONSENSUS_PORT, MULTICAST_ADDRESS)
         self.multicast_address = multicast_address
         self.multicast_port = multicast_port
+        self.agreement_socket = lib.setup_agreement_socket(CONSENSUS_PORT, self.multicast_address)
         self.multicast_listener_socket = lib.setup_multicast_listener_socket(multicast_port, multicast_address)
         self.client_listener_socket = None
         self.server_socket = lib.setup_server_socket(multicast_address)
@@ -719,6 +719,7 @@ class Member:
 
         # if not leader_responses:
         #     lib.print_message("no other leaders found", self.id)
+
 
 if __name__ == "__main__":
     member = None
