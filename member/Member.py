@@ -96,7 +96,7 @@ class Member:
             if self.state == State.State.follower:
                 time.sleep(SLEEP_TIMEOUT)
 
-                if self.heartbeat_received:
+                if self.heartbeat_received or self.node_wait_time != 0:
                     # Reset timeout interval
                     self.heartbeat_timeout_point = lib.get_random_timeout()
                     self.heartbeat_received = False
