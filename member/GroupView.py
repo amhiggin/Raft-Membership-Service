@@ -6,8 +6,9 @@
     Checks are in place to prevent duplicates from being added.
 '''
 import sys
+import time
+import datetime
 sys.path.append("../")
-import member.MemberLib as lib
 
 class GroupView(object):
 
@@ -20,8 +21,7 @@ class GroupView(object):
             self.members.append(new_member_id)
             return True
         else:
-            print('>> {0}\t Member {1} was already in my group view - did not duplicate.'.format(lib.get_timestamp(),
-                                                                                                  new_member_id))
+            print('>> {0}\t Member {1} was already in my group view - did not duplicate.'.format(self.get_timestamp(), new_member_id))
             return False
 
     # Remove a member from the group view
@@ -30,8 +30,8 @@ class GroupView(object):
             self.members.remove(old_member_id)
             return True
         else:
-            print('>> {0}\t Member {1} was not in the group view - did not attempt removal.'.format(lib.get_timestamp(),
-                                                                                                    old_member_id))
+            print('>> {0}\t Member {1} was not in the group view - did not attempt removal.'.format(
+                self.get_timestamp(), old_member_id))
             return False
 
     def contains(self, member):
@@ -55,3 +55,6 @@ class GroupView(object):
 
     def erase(self):
         self.members = []
+
+    def get_timestamp(self):
+        return datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')

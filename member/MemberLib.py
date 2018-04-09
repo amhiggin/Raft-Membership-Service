@@ -10,7 +10,6 @@ import MessageType, Message
 import member.Constants as constants
 import pickle
 import zlib
-import member.State as State
 
 REMOVED = "removed"
 
@@ -26,9 +25,9 @@ def print_message(message, id):
     print('>> {0} Member {1}:\t'.format(get_timestamp(), str(id)) + message)
 
 
-# Randomised timeout delay (between 4-10 seconds) used by heartbeat messaging.
+# Randomised timeout delay (between 6-10 seconds) used by heartbeat messaging.
 def get_random_timeout():
-    return time.time() + random.uniform(4, 10)
+    return time.time() + random.uniform(6, 10)
 
 
 def setup_client_socket(port, multicast_address):
@@ -104,7 +103,6 @@ def get_groupview_consensus(member):
             else:
                 print_message("Member {0} disagreed with {1}".format(decoded_message.get_member_id(),
                                                                      member.group_view), member.id)
-    # When exiting, consensus will have been reached
 
 
 def send_client_groupview_response(member, client):
@@ -116,72 +114,13 @@ def send_client_groupview_response(member, client):
     print_message("Sent group view to client {0}".format(client), member.id)
 
 
-# Processes the responses to deletion requests to members of the group as part of the deletion of the group/
-def remove_members_from_group(member):
-    members_backup = member.group_view
-    num_responses = 0
-    members_to_remove = []
-    respondents = []
-    initial_group_size_including_leader = member.group_view.get_size()
-
-    member.agreement_socket.settimeout(30)
-    member.agreement_socket.sendto(pickle.dumps(Message.Message(
-        member.group_id, member.term, MessageType.MessageType.member_group_delete_request, None, member.id, '',
-        member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
-        (constants.MULTICAST_ADDRESS, constants.CONSENSUS_PORT))
-
-    while num_responses < (initial_group_size_including_leader - 1):
-        message, responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
-        decoded_message = pickle.loads(message)
-        if (decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_response) and (decoded_message.get_member_id() is not member.id):
-            if decoded_message.get_data() == constants.AGREED:
-                print_message("Member {0} agreed to leave the group {1}".format(decoded_message.get_member_id(),
-                    member.group_view), member.id)
-                members_to_remove.append(decoded_message.get_member_id())
-                respondents.append(decoded_message.get_member_id())
-                num_responses += 1
-            else:
-                print_message("Member {0} did not agree to leave the group {1}".format(decoded_message.get_member_id(),
-                    member.group_id), member.id)
-    if num_responses == (initial_group_size_including_leader - 1):
-        try:
-            safe_remove_members_from_group(member, respondents)
-            member.state = State.State.outsider
-            member.running = False
-        except Exception as e:
-            print_message("Failed to remove all group members from the group: rolling back", member.id)
-            member.group_view = members_backup
-
-
-# Safely remove members of the group, getting acknowledgements and storing backups for rollbacks in case of failure.
-def safe_remove_members_from_group(member, respondents):
-    while member.group_view.get_size() > 1:
-        print_message("Checking for finalisation of removal from group", member.id)
-        member.agreement_socket.sendto(pickle.dumps(Message.Message(
-           member.group_id, member.term, MessageType.MessageType.finalise_member_removal_request, None, member.id, '',
-           member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
-           (constants.MULTICAST_ADDRESS, constants.CONSENSUS_PORT))
-        response, deletion_responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
-        decoded_response = pickle.loads(response)
-        if decoded_response.get_data() == constants.REMOVED and respondents.__contains__(decoded_response.get_member_id()) and \
-                (decoded_response.get_message_type() is MessageType.MessageType.finalise_member_removal_response):
-           member.group_view.remove_member(decoded_response.get_member_id())
-
-    # Now remove the leader too
-    member.group_view.remove_member(member.id)
-    if member.group_view.get_size() == 0:
-        print_message("All members have successfully been removed from the group view", member.id)
-    else:
-        raise ValueError("There was an issue with removing members from the group for deletion")
-
-
-def send_deletion_response_to_client(member, client):
+def send_deletion_response_to_client(member, client, response):
     try:
         member.client_listener_socket.sendto(pickle.dumps(Message.Message(
-            member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, constants.SUCCESS,
+            member.group_id, member.term, MessageType.MessageType.client_group_delete_response, None, member.id, response,
             member.index_of_latest_uncommitted_log, member.index_of_latest_committed_log, member.group_view)),
             client)
-        print_message("Sent deletion response to client {0}".format(client), member.id)
+        print_message("Sent deletion response to client {0}: {1}".format(client, response), member.id)
     except Exception as e:
         print_message("Exception occurred whilst sending deletion confirmation to client: {0}".format(str(e)), member.id)
 

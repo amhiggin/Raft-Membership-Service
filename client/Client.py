@@ -11,7 +11,7 @@ import client.ClientLib as lib
 # from pip._vendor.distlib.compat import raw_input
 
 WELCOME_MESSAGE = 'Hello world from client, listening on port {0}'
-DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership.\n\t- 2 to delete a group, given its address\n\t- 3 to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
+DISPLAY_USER_OPTIONS = "---------\n>> {0} Client:\tEnter:\n\t- 1 to request the current group membership, given its address.\n\t- 2 to delete a group, given its address\n\t- 3 to see all available groups.\n\t- x to terminate.\n".format(lib.get_timestamp())
 DISPLAY_REQUEST_FOR_GROUP_ADDRESS = "Enter the name of the group:\n"
 REQUEST_TIMED_OUT = "The request timed out. There may have been an issue. Try again!"
 USAGE_MESSAGE = "Usage: <port_num>"

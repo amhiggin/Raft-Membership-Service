@@ -1,8 +1,7 @@
 '''
     This is one of the server nodes in the RAFT distributed system. The service provided to the client will be to give them the current membership of the group.
-    Each member has a group view, a mode (follower/candidate/leader), and a log of what operations it has performed.
-    UDP is used for communication. Heartbeats are used to maintain the group view of every node, and message sequencing is used to detect message loss.
-    Other recovery mechanisms, client service to be provided.
+    Each member has a group view, a state (follower/candidate/leader), and a log of what updates have been performed to the group membership.
+    UDP is used for communication. Heartbeats from a single leader are used to maintain the group view of every node.
 '''
 import _thread
 import pickle
@@ -10,15 +9,12 @@ import socket
 import struct
 import sys
 import time
-import uuid
-import zlib
 
 sys.path.append("../")
 sys.path.append(".")
 
-import member.Constants
 from member.Constants import MULTICAST_ADDRESS, MULTICAST_PORT, CLIENT_LISTENING_PORT, CONSENSUS_PORT, \
-    RECV_BYTES, SLEEP_TIMEOUT, AGREED, REMOVED, PARTITION_MULTICAST_ADDRESS
+    RECV_BYTES, SLEEP_TIMEOUT, AGREED, SUCCESS, PARTITION_MULTICAST_ADDRESS
 
 import member.GroupView as GroupView
 import member.MemberLib as lib
@@ -28,24 +24,15 @@ import GroupAddressMessage
 import MessageDataType
 import MessageType
 import uuid
-
 import zlib
 
 '''  Server constants '''
-SERVER_PORT = 45678  # Review
+SERVER_PORT = 45678
 DEFAULT_STATE = State.State.follower
-MULTICAST_ADDRESS = '224.3.29.71'     # 224.0.0.0 - 230.255.255.255 -> Addresses reserved for multicasting
-MULTICAST_PORT = 45678
 PARTITION_MULTICAST_PORT = 45679
-PARTITION_MULTICAST_ADDRESS = '224.3.29.72'
 MULTIGROUP_MULTICAST_ADDRESS = '224.3.29.73'
 MULTIGROUP_MULTICAST_PORT = 45680
-CLIENT_LISTENING_PORT = 56789
 GROUPVIEW_CONSENSUS_PORT = 54321
-
-''' Generic constants '''
-RECV_BYTES = 2048 #1024
-SLEEP_TIMEOUT = 1
 
 
 class Member:
@@ -77,6 +64,7 @@ class Member:
         else:
             self.state = State.State.outsider
 
+        self.deleting_group = False
         self.heartbeat_timeout_point = None
         self.election_timeout_point = None
         self.heartbeat_received = False
@@ -152,12 +140,11 @@ class Member:
             pickle.dumps(GroupAddressMessage.GroupAddressMessage(
                 self.group_id,
                 leader_multicast_group)),
-            # self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
             leader_multigroup_address)
         try:
             time.sleep(SLEEP_TIMEOUT)
         except Exception as e100:
-             lib.print_message('e100: ' + str(e100), self.id)
+            lib.print_message('e100: ' + str(e100), self.id)
 
     # Startup node, configure socket
     def start_serving(self):
@@ -196,41 +183,16 @@ class Member:
             self.do_exit_behaviour()
             sys.exit(1)
 
-    # What the leader executes if they receive an incoming client request
-    # Gets consensus from the members of the group, on the current group view.
-    def process_client_request_thread(self, incoming_message, client):
-        decoded_message = pickle.loads(incoming_message)
-        try:
-            if self.state is State.State.leader:
-                if decoded_message.get_message_type() is MessageType.MessageType.service_request:
-                    lib.print_message("Received service request from {0}".format(client), self.id)
-                    self.agreement_socket.settimeout(30)
-                    self.agreement_socket.sendto(pickle.dumps(Message.Message(
-                        self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None, self.id, '',
-                        self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
-                        (self.multicast_address, CONSENSUS_PORT))
-
-                    lib.get_groupview_consensus(self)
-                    lib.send_client_groupview_response(self, client)
-
-                elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
-                    lib.print_message("Received group deletion request from {0}".format(client), self.id)
-                    lib.remove_members_from_group(self)
-                    lib.send_deletion_response_to_client(self, client)
-        except Exception as e:
-            lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
-
-
-    # Start listening for client requests
+    # Start listening for client requests: only process them if you're the leader.
     def listen_for_client(self):
-        while True:
+        while True and self.running is True:
             try:
-                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, self.multicast_address)
-
+                self.client_listener_socket = lib.setup_client_socket(CLIENT_LISTENING_PORT, MULTICAST_ADDRESS)
                 while self.running and self.state is State.State.leader:
                     incoming_message, client = self.client_listener_socket.recvfrom(RECV_BYTES)
                     try:
-                        _thread.start_new_thread(self.process_client_request_thread(incoming_message, client), (incoming_message, client))
+                        _thread.start_new_thread(self.process_client_request_thread(incoming_message, client),
+                                                 (incoming_message, client))
                     except Exception as consensus_response_exception:
                         lib.print_message("Exception occurred whilst getting group view consensus: {0}".format(
                             str(consensus_response_exception)), self.id)
@@ -241,6 +203,50 @@ class Member:
             except Exception as client_listen_exception:
                 lib.print_message("An exception occurred whilst listening for client requests: {0}".format(
                     str(client_listen_exception)), self.id)
+
+    # What the leader executes if they receive an incoming client request
+    # Gets consensus from the members of the group, on the current group view.
+    def process_client_request_thread(self, incoming_message, client):
+        decoded_message = pickle.loads(incoming_message)
+        try:
+            if self.state is State.State.leader:
+                # Client request for number of members in group
+                if decoded_message.get_message_type() is MessageType.MessageType.service_request:
+                    lib.print_message("Received service request from {0}".format(client), self.id)
+                    self.agreement_socket.settimeout(30)
+                    self.agreement_socket.sendto(pickle.dumps(Message.Message(
+                        self.group_id, self.term, MessageType.MessageType.check_group_view_consistent, None,
+                        self.id, '',
+                        self.index_of_latest_uncommitted_log, self.index_of_latest_committed_log, self.group_view)),
+                        (MULTICAST_ADDRESS, CONSENSUS_PORT))
+                    lib.get_groupview_consensus(self)
+                    lib.send_client_groupview_response(self, client)
+                # Client request to delete the group
+                elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
+                    lib.print_message("Received group deletion request from {0}".format(client), self.id)
+                    self.deleting_group = True
+                    self.remove_group_members_safely()
+                    self.running = False
+                    lib.send_deletion_response_to_client(self, client, SUCCESS)
+        except Exception as e:
+            lib.print_message("An exception occurred when processing a client request: {0}".format(str(e)), self.id)
+
+    # Removes each members of the group on a consensus basis
+    # If the leader were to fail during deletion, the group view will hence remain consistent.
+    def remove_group_members_safely(self):
+        intermediate_group_view = self.group_view
+
+        while self.group_view.get_size() > 1:
+            # We still have group members: remove them one at a time
+            self.unresponsive_followers.append(intermediate_group_view.get_members().pop())
+
+            while self.group_view != intermediate_group_view:
+                # Until we have removed this node, we wait.
+                pass
+            intermediate_group_view = self.group_view
+
+        self.group_view.remove_member(self.id)
+        lib.print_message("Successfully removed all members from the group.", self.id)
 
     # Follower response to consensus-checking for a client request. The follower should verify the group
     # view if it matches theirs.
@@ -259,27 +265,18 @@ class Member:
                         if decoded_message.get_group_view().exists_difference(self.group_view.get_members()):
                             response = ''
                         self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                              response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
-                    # Group deletion request
-                    elif decoded_message.get_message_type() is MessageType.MessageType.member_group_delete_request:
-                        response_type = MessageType.MessageType.member_group_delete_response
-                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
-                    # Group deletion confirmation/finalisation request
-                    elif decoded_message.get_message_type() is MessageType.MessageType.finalise_member_removal_request:
-                        # TODO @Amber remove notion of group from the follower
-                        response = REMOVED
-                        response_type = MessageType.MessageType.finalise_member_removal_response
-                        self.agreement_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term,
-                            response_type, None, self.id, response)), (self.multicast_address, CONSENSUS_PORT))
+                                                                                  response_type, None, self.id,
+                                                                                  response)),
+                                                     (MULTICAST_ADDRESS, CONSENSUS_PORT))
                 except socket.timeout:
                     lib.print_message("timed out", self.id)
                     break
 
+
     # Listening/responding loop - outsider
     def do_outsider_message_listening(self):
         # Listen for heartbeat messages from leaders
-        while True:
+        while True and self.state == State.State.outsider:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -298,7 +295,7 @@ class Member:
             pass
         else:
             if message.get_message_type() == MessageType.MessageType.join_acceptance:
-                lib.print_message('I have been accepted into a group', self.id)
+                lib.print_message('I have been accepted into a group at {0} '.format(address), self.id)
 
                 # Replicate the leader's log (which is included in the acceptance message)
                 with open(self.log_filename, 'w') as log_file:
@@ -314,7 +311,7 @@ class Member:
     def do_candidate_message_listening(self):
 
         # Listen for multicast messages from other candidates and leaders (NB: Multicast senders also receive their own messages)
-        while True:  # Listen until you timeout (i.e. there are no more messages)
+        while True and self.state == State.State.candidate:  # Listen until you timeout (i.e. there are no more messages)
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -362,9 +359,6 @@ class Member:
                 else:
                     if message.get_message_type() == MessageType.MessageType.vote and message.get_term() == self.term:
                         lib.print_message('Vote received from Member ' + message.get_member_id() + ' at ' + str(address), self.id)
-                        # if not voters.__contains__(address):
-                        #   voters.append(address)
-                        #    votes_received += 1
                         votes_received += 1
 
                         if votes_received >= votes_needed:
@@ -392,7 +386,7 @@ class Member:
     # Listening/responding loop - leader
     def do_leader_message_listening(self):
         # Listen for multicast messages from candidates and other leaders (NB: Multicast senders also receive their own messages)
-        while True:
+        while True and self.state == State.State.leader:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -421,7 +415,7 @@ class Member:
                     if self.message_data_type_of_previous_message == MessageDataType.MessageType.removal_of_follower:
                         lib.print_message('I will retry removing a follower', self.id)
                         message_data_type = MessageDataType.MessageType.removal_of_follower
-                    elif self.message_data_type_of_previous_message == MessageDataType.MessageType.addition_of_outsider:
+                    elif self.message_data_type_of_previous_message == MessageDataType.MessageType.addition_of_outsider and self.deleting_group is False:
                         lib.print_message('I will retry adding an outsider', self.id)
                         message_data_type = MessageDataType.MessageType.addition_of_outsider
                     elif self.message_data_type_of_previous_message == MessageDataType.MessageType.new_leader_elected:
@@ -434,7 +428,7 @@ class Member:
 
                     if message_data_type == MessageDataType.MessageType.removal_of_follower:
                         removing_a_follower = True
-                    elif message_data_type == MessageDataType.MessageType.addition_of_outsider:
+                    elif message_data_type == MessageDataType.MessageType.addition_of_outsider and self.deleting_group is False:
                         adding_an_outsider = True
                     elif message_data_type == MessageDataType.MessageType.new_leader_elected:
                         announcing_ascension_to_leadership = True
@@ -450,7 +444,7 @@ class Member:
                     self.message_data_of_previous_message = self.unresponsive_followers[0]
                     removing_a_follower = True
 
-                elif len(self.outsiders_waiting_to_join) > 0:
+                elif len(self.outsiders_waiting_to_join) > 0 and self.deleting_group is False:
                     message_data_type = MessageDataType.MessageType.addition_of_outsider
                     self.message_data_type_of_previous_message = MessageDataType.MessageType.removal_of_follower
 
@@ -479,13 +473,15 @@ class Member:
                         self.index_of_latest_uncommitted_log,
                         self.index_of_latest_committed_log,
                         self.group_view)),
-                    #self.group_view if self.leader_update_group_view else '')), # send group view data (sending current state instead of changes, for ease)
                     leader_multicast_group)
             except Exception as e2:
                 lib.print_message('Exception e2: ' + str(e2), self.id)
 
-            if removing_a_follower is True:
+            if removing_a_follower is True and self.deleting_group is False:
                 responses_needed_to_commit_removal_of_follower = (self.group_view.get_size() // 2) + 1
+            if removing_a_follower is True and self.deleting_group is True:
+                # Special case for group deletion: only need half, not necessarily majority
+                responses_needed_to_commit_removal_of_follower = (self.group_view.get_size() // 2)
             elif adding_an_outsider is True:
                 responses_needed_to_commit_addition_of_outsider = (self.group_view.get_size() // 2) + 1
             elif announcing_ascension_to_leadership is True:
@@ -515,7 +511,7 @@ class Member:
                         if self.unresponsive_followers.__contains__(message.get_member_id()) is False:  # Disregard acknowledgements from followers that have been marked for removal
                             lib.print_message('Heartbeat ACK received from Member ' + str(message.get_member_id() + ' at ' + str(member_address)), self.id)
                             response_received.add(message.get_member_id())
-                    elif message.get_message_type() == MessageType.MessageType.join_request:
+                    elif message.get_message_type() == MessageType.MessageType.join_request and self.deleting_group is False:
                         if self.outsiders_waiting_to_join.__contains__(message.get_member_id()) is False and self.group_view.contains(message.get_member_id()) is False:
                             self.outsiders_waiting_to_join.append(message.get_member_id())
                             self.outsiders_addresses.append(member_address)
@@ -535,11 +531,10 @@ class Member:
 
                     # Remove the old follower from the list of followers to be removed
                     self.unresponsive_followers.remove(follower_to_remove)
-
                 else:
                     lib.print_message('I did not get enough responses to commit to the removal of the follower', self.id)
 
-            elif adding_an_outsider is True:
+            elif adding_an_outsider is True and self.deleting_group is False:
                 if len(response_received) >= responses_needed_to_commit_addition_of_outsider:
 
                     # Add the new member to your own group view
@@ -598,7 +593,7 @@ class Member:
 
     # Listening/responding loop - follower
     def do_follower_message_listening(self):
-        while True:
+        while True and self.state == State.State.follower:
             try:
                 message, sender = self.multicast_listener_socket.recvfrom(RECV_BYTES)
                 message = pickle.loads(message)
@@ -681,17 +676,6 @@ class Member:
                             self.server_socket.sendto(pickle.dumps(Message.Message(self.group_id, self.term, MessageType.MessageType.vote, None, self.id, '')), sender)
                             self.voted = True
 
-        # # Listen for direct confirmation from the leader that you have been removed from the group
-        # try:
-        #     message, address = self.server_socket.recvfrom(RECV_BYTES)
-        #     message = pickle.loads(message)
-        # except socket.timeout:
-        #     pass
-        # else:
-        #     if message.get_message_type() == MessageType.MessageType.removal:
-        #         lib.print_message('I have been removed from the group', self.id)
-        #         self.state = State.State.outsider
-
     @staticmethod
     def multigroup_network_outsider_listener(starting_id):
         groups = set()
@@ -700,7 +684,7 @@ class Member:
             MULTIGROUP_MULTICAST_ADDRESS)
         # leader_responses = [(MULTICAST_ADDRESS, MULTICAST_PORT)]
         search_timeout_point = lib.get_random_timeout()
-        lib.print_message("listening for all leader messages", starting_id)
+        lib.print_message("Listening for groups to join...", starting_id)
         while True:
             try:
                 if groups and time.time() > search_timeout_point:
@@ -726,9 +710,6 @@ class Member:
                                 multicast_port=multicast_port)
                 lib.print_message('Creating new outsider for ' + multicast_address + ":" + str(multicast_port), starting_id)
                 _thread.start_new_thread(member.start_serving, ())
-
-        # if not leader_responses:
-        #     lib.print_message("no other leaders found", self.id)
 
 
 if __name__ == "__main__":
