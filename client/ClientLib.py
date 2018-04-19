@@ -49,7 +49,7 @@ def get_group_listener_socket():
 def send_service_request(self_socket, group_id):
     group_info = GROUPS_INFO[group_id]
     print_message('Sending a request for the members of group {0}'.format(group_id))
-    message = Message.Message(None, -1, MessageType.MessageType.service_request, '', None, None)
+    message = Message.Message(group_id, -1, MessageType.MessageType.service_request, '', None, None)
     multicast_group = (group_info["address"], GROUP_PORT)
 
     try:
@@ -68,7 +68,7 @@ def send_service_request(self_socket, group_id):
 def send_delete_request(self_socket, group_id):
     group_info = GROUPS_INFO[group_id]
     print_message('Sending a request to delete group {0}'.format(group_id))
-    message = Message.Message(None, -1, MessageType.MessageType.client_group_delete_request, '', None, None)
+    message = Message.Message(group_id, -1, MessageType.MessageType.client_group_delete_request, '', None, None)
     multicast_group = (group_info["address"], GROUP_PORT)
 
     try:

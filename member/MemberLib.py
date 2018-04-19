@@ -34,7 +34,7 @@ def setup_client_socket(port, multicast_address):
     client_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client_listener_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    follower_address = (multicast_address, port)
+    follower_address = ('', port)
     client_listener_socket.bind(follower_address)
     client_listener_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 1))
 
@@ -89,7 +89,7 @@ def setup_multicast_listener_socket(multicast_port, multicast_address):
 
 
 def get_groupview_consensus(member):
-    num_agreements = 0
+    num_agreements = 1
     while num_agreements < (calculate_required_majority(member.group_view)):
         message, responder = member.agreement_socket.recvfrom(constants.RECV_BYTES)
         decoded_message = pickle.loads(message)
@@ -125,7 +125,7 @@ def send_deletion_response_to_client(member, client, response):
 
 
 def calculate_required_majority(group_view):
-    return group_view.get_size() / 2
+    return group_view.get_size() // 2 + 1
 
 
 def handle_timeout_exception(e):

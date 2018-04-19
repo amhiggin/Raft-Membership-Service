@@ -114,10 +114,10 @@ class Member:
                     lib.print_message('Election timeout - I am going to start a new term', self.id)
                     self.ready_to_run_for_election = True
 
-    def network_partition_thread(self):
+    def network_partition_thread(self, partition_address):
         time.sleep(self.partition_timer)
         # Enter partition
-        self.multicast_address = PARTITION_MULTICAST_ADDRESS
+        self.multicast_address = partition_address
         self.multicast_port = PARTITION_MULTICAST_PORT
         self.multicast_listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.multicast_listener_socket.settimeout(0.2)
@@ -166,7 +166,7 @@ class Member:
             # Network partition thread
             if self.partition_timer != 0:
                 print('Starting network partition timer')
-                _thread.start_new_thread(self.network_partition_thread, ())
+                _thread.start_new_thread(self.network_partition_thread, (sys.argv[3],))
 
             node_failure_demo_timeout = lib.get_wait_time(self.node_wait_time)
 
@@ -227,7 +227,7 @@ class Member:
         try:
             if self.state is State.State.leader:
                 # Client request for number of members in group
-                if decoded_message.get_message_type() is MessageType.MessageType.service_request:
+                if decoded_message.get_message_type() is MessageType.MessageType.service_request and decoded_message.get_group_id() == self.group_id:
                     lib.print_message("Received service request from {0}".format(client), self.id)
                     self.agreement_socket.settimeout(30)
                     self.agreement_socket.sendto(pickle.dumps(Message.Message(
@@ -238,7 +238,7 @@ class Member:
                     lib.get_groupview_consensus(self)
                     lib.send_client_groupview_response(self, client)
                 # Client request to delete the group
-                elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request:
+                elif decoded_message.get_message_type() is MessageType.MessageType.client_group_delete_request and decoded_message.get_group_id() == self.group_id:
                     lib.print_message("Received group deletion request from {0}".format(client), self.id)
                     self.deleting_group = True
                     self.remove_group_members_safely()
@@ -711,7 +711,7 @@ class Member:
                     continue
                 else:
                     groups.add(group_id)
-                if len(sys.argv) == 3:
+                if len(sys.argv) == 4:
                     partition_timer = int(sys.argv[2])
                     member = Member(starting_id, group_id, group_founder, partition_timer, 0, 0, multicast_address=multicast_address,
                                 multicast_port=multicast_port)
