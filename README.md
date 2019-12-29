@@ -1,4 +1,4 @@
-# Distributed Management System
+# Raft Membership Service
 A membership management system for a set of distributed nodes.
 
 The system spec requires a number of services to be provided, including:
