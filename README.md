@@ -10,3 +10,4 @@ The system spec requires a number of services to be provided, including:
 The spec requires that each member of the managed group should have a consistent view of group membership at any given time, i.e. at a minimum, they should see the same sequence of changes to group membership over time.
 
 
+<b>Note</b>: Entitlements/identity management are not catered for as part of this service.
